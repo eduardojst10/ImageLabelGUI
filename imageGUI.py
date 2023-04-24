@@ -1,4 +1,4 @@
-from PyQt6 import QtWidgets, QtCore, QtGui
+from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QApplication,QLabel,QComboBox, QPlainTextEdit,QFrame,
     QStackedWidget,QPushButton,QWidget, QSlider,QHBoxLayout,QVBoxLayout,QTextEdit,
@@ -6,50 +6,61 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap, QStandardItemModel, QStandardItem
 from PyQt6.QtCore import Qt, QDir,QFileInfo, QSize, QStandardPaths
-
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 60})
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
-from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene
-from PyQt5.QtGui import QImage, QPixmap, QPainter
+from PIL import Image, ImageQt
 import pydicom
-import numpy as np
-import pandas as pd
+from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
 import json
-import math
-import sys
 import os
+import sys
 from pathlib import Path
+from styles import button_style, combo_style,frame_number_style,coordinates_box_style, instructions_style, tree_view_style,scrollbar_css
 
 
 
-class ImageBox(FigureCanvasQTAgg):
-    def __init__(self, parent, image_path, width=5, height=4, dpi=120, aspect_ratio=1.0):
+class ImageBox(QLabel):
+    def __init__(self, parent,ds,image_path):
+        super(ImageBox, self).__init__(parent)
         self.parent = parent
+        self.setFixedSize(512, 512)
+        self.setScaledContents(True)
         self.image_path = image_path
-        adjusted_heigth = width/aspect_ratio
-        self.fig = Figure(figsize=(width, adjusted_heigth), dpi=dpi)
-        self.axes = self.fig.add_subplot(111)
-        super(ImageBox, self).__init__(self.fig)
+        self.load_dicom_image(ds)
 
-        ds = pydicom.dcmread(image_path)
-        im = self.axes.imshow(ds.pixel_array, cmap='gray')
+    
+    def load_dicom_image(self,ds):
+        pixel_array = ds.pixel_array
 
-        # Calculate the scaling factor and the offset
-        ax_width = self.axes.get_window_extent().width
-        ax_height = self.axes.get_window_extent().height
-        img_width = im.get_size()[0]
-        img_height = im.get_size()[1]
+        # Apply the Modality LUT if present
+        pixel_array = apply_modality_lut(pixel_array, ds)
 
-        self.scale_x = img_width / ax_width
-        self.scale_y = img_height / ax_height
+        # Apply the VOI LUT if present
+        pixel_array = apply_voi_lut(pixel_array, ds)
 
-        self.offset_x = (ax_width - img_width / self.scale_x) / 2
-        self.offset_y = (ax_height - img_height / self.scale_y) / 2       
-        
+        # Normalize the pixel array
+        pixel_array = ((pixel_array - pixel_array.min()) * (255.0 / (pixel_array.max() - pixel_array.min()))).astype('uint8')
+
+        pil_image = Image.fromarray(pixel_array)
+        qt_image = ImageQt.ImageQt(pil_image)
+        pixmap = QPixmap.fromImage(qt_image)
+
+        self.setPixmap(pixmap)
+    
+  
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            x = event.pos().x()
+            y = event.pos().y()
+
+            self.parent.labels[self.image_path] = (x, y)
+            print(self.image_path, ': (', x, ',', y, ')')
+        else:
+            self.mousePressEventExtreme(event)
+      
+    # ver se a de cima está bem 
+    def mousePressEventExtreme(self, event):
         current_widget = self.parent.stacked_widget.currentIndex()
         current_widget_obj = self.parent.stacked_widget.widget(current_widget)
         # Get the mouse click position relative to the current image widget
@@ -63,6 +74,7 @@ class ImageBox(FigureCanvasQTAgg):
         image_path = self.image_path
         self.parent.labels[image_path] = (x_img, y_img)
         print(self.image_path,': (',x,',',y,')')
+            
         
 # Subclass QMainWindow to customize your application's main window
 class MainWindow(QMainWindow):
@@ -72,102 +84,30 @@ class MainWindow(QMainWindow):
         # Name Window
         self.setWindowTitle("frameLabelGUI")
         # Background color
-        self.setStyleSheet('background-color:#37516b;')
+        self.setStyleSheet('background-color:#37516b;') 
+    # ---------------------------------------------- Default Vars --------------------------------------
         
-        
-        # C:\Users\USER\Desktop\test
         self.base_dir = 'D:/DataOrtho/'
-        self.root_path = 'D:/DataOrtho/DATASET_AXIAL_ANONYMOUS'
-        self.current_path = 'D:/DataOrtho/DATASET_AXIAL_ANONYMOUS/1/LEFT/pd_tse_fs_tra_320_3'
-        # CSS for buttons
-        button_style = '''
-            QPushButton {
-            background-color: rgb(255,255,255); /* White */
-            border: none;
-            color: black;
-            padding: 15px 32px;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-            font-size: 16px;
-            margin: 4px 2px;
-            cursor: pointer;
-            border-radius: 5px;
-        }
-        QPushButton:hover {
-            background-color: #2A78AC; /* Dark green */
-        }
-        '''
-        # CSS for ComboBox
-        combo_style = '''
-            QComboBox {
-                background-color: #f7f7f7;
-                border: 1px solid #c9c9c9;
-                border-radius: 2.5px;
-                padding: 1px 18px 1px 3px;
-                min-width: 6em;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 20px;
-                border-left-width: 1px;
-                border-left-color: darkgray;
-                border-left-style: solid;
-                border-top-right-radius: 5px;
-                border-bottom-right-radius: 5px;
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #d3d3d3, stop:1 #c3c3c3);
-            }
 
-            QComboBox::down-arrow {
-                image: url(path/to/arrow_down.png);
-            }
-
-            QComboBox QAbstractItemView {
-                border: 1px solid darkgray;
-                selection-background-color: lightgray;
-            }
-        '''
-        # CSS frame box
-        frame_number_style = '''
-            QLabel {
-                font-size: 18px;
-                font-weight: bold;
-                color: #FFFFFF; /* White */
-                background-color: #121421; /* Dark blue */
-                border: 2px solid #FFFFFF; /* White */
-                border-radius: 3px;
-                text-align: center;
-                padding: 5px 10px;
-                margin: 10px;
-                min-width: 60px;
-                min-height: 30px;
-            }
-        '''
         
-        coordinates_box_style = '''
-            QPlainTextEdit{
-                background-color: #f0f0f0;
-                color: #333;
-                border: 1px solid #999;
-                border-radius: 2px;
-            }   
-        '''
+        # First Current path is decided by current state 
+        self.current_sequence_path, self.current_subset_path = self.getCurrentSequence()    
+        # Max number of landmarks too be appointed to each different dataset
         
-        instructions_style = '''
-            QTextEdit {
-                background-color: #121421;
-                color: white;
-                border: 1px solid #999;
-                border-radius: 2px;
-            } 
-        '''
+        self.max_landmarks = {'AXIAL':6,'SAGITTAL':6,'DYNAMIC':6}
         
-        self.normal_image_paths,self.dicom_paths = self.loadImagesFromSequence(self.current_path)
+    # ---------------------------------------------- GUI COMPONENTS --------------------------------------      
+        #Individual info
+        self.image_path_label = QLabel()
+        #self.image_path_label.setText(self.dicom_paths[0])
+        self.image_path_label.setStyleSheet(frame_number_style)
+        self.image_path_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Updating the image_path_label
+        self.update_image_path_label(self.current_sequence_path)
+        
+        
         # To hold multiple Images/Frames
         self.stacked_widget = QStackedWidget(self)
-        # TODO: Used for obtaining coordinates self.labels
         self.labels = {}
         
         # Box to display marked landmarks
@@ -176,23 +116,37 @@ class MainWindow(QMainWindow):
         self.coordinates_box.setMaximumHeight(150)
         self.coordinates_box.setStyleSheet(coordinates_box_style)
         
-        
+        # Box to display instructions
         self.instructions_box = QTextEdit(self)
         self.instructions_box.setReadOnly(True)
         self.instructions_box.setMaximumHeight(150)
         self.instructions_box.setStyleSheet(instructions_style)
         self.instructions_box.setPlainText("frameLabelGUI:\n\n1. 'Next' and 'Previous' or slider buttons to navigate between images.\n2. Click on the image to mark a landmark.\n3. 'Clear Coordinates' button to remove landmarks.\n4. 'Save Coordinates' button to save the marked landmarks.")
 
-    
+        
+        # Add a number of Frame to localize in dataset 
+        self.frame_number = QLabel()
+        self.frame_number.setText("1")
+        self.frame_number.setStyleSheet(frame_number_style)
+        self.frame_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Slider to  change the image
+        slider_layout = QVBoxLayout()
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.valueChanged.connect(self.updateImageSlider)
+        slider_layout.addWidget(self.slider)
+        slider_layout.addWidget(self.frame_number)
+
+        # self.normal_image_paths debug
+        self.normal_image_paths,self.dicom_paths = self.loadImagesFromSequence(self.current_sequence_path)        
+       
         # Image paths received from loadImagesFromSequence
         if  self.dicom_paths:
             for image_path in self.dicom_paths:
                 ds = pydicom.dcmread(image_path)
-                canvas = ImageBox(self, image_path)
-                canvas.axes.imshow(ds.pixel_array, cmap='gray')
+                image = ImageBox(self,ds,image_path)
+                self.stacked_widget.addWidget(image)   
                 
-                self.stacked_widget.addWidget(canvas)
-        
         else:    
             for image_path in self.normal_image_paths:
                 ds = mpimg.imread(image_path)
@@ -200,9 +154,7 @@ class MainWindow(QMainWindow):
                 canvas.axes.imshow(ds, cmap='gray')
                 self.stacked_widget.addWidget(canvas)
                 self.stacked_widget.setCurrentIndex(0)
-          
-  
-        
+
         # Two QPushButton widgets to switch between image frame
         self.prev_button = QPushButton('Previous', self)
         self.next_button = QPushButton('Next', self)
@@ -239,7 +191,6 @@ class MainWindow(QMainWindow):
         self.choose_picture_comboboxSource.addItems(self.getDirectories())
         self.choose_picture_comboboxSource.currentIndexChanged.connect(self.update_tree_view)
         choose_data_layout.addWidget(self.choose_picture_comboboxSource)
-
         
         # Tree View - implementar QTreeView para status de data gathering and so on
         self.tree_view = QTreeView(self)
@@ -247,18 +198,16 @@ class MainWindow(QMainWindow):
         # setting up the file system model
         self.model = QStandardItemModel()
         self.tree_view.setModel(self.model)
+        combined_css = tree_view_style + scrollbar_css
+        self.tree_view.setStyleSheet(combined_css)
+
+        
         self.tree_view.clicked.connect(self.on_sequence_clicked)
         self.model.setHorizontalHeaderLabels(['Folder','Status','Landmarks'])
-        self.add_folder_to_model(self.root_path, self.model.invisibleRootItem(),0)
+        self.add_folder_to_model(self.current_subset_path, self.model.invisibleRootItem(),0)
         choose_data_layout.addWidget(self.tree_view)
-        
-        # Add a Frame Number
-        self.frame_number = QLabel()
-        self.frame_number.setText("1")
-        self.frame_number.setStyleSheet(frame_number_style)
-        self.frame_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
     
-        
+
         # 'Previous' and 'Next' button 
         btn_changeframe_layout = QHBoxLayout()
         btn_changeframe_layout.addWidget(self.prev_button)
@@ -269,17 +218,10 @@ class MainWindow(QMainWindow):
         btnframeState_layout.addWidget(self.clear_button)
         btnframeState_layout.addWidget(self.save_button)
 
-   
         # Left layout . Create a layout for the image and the stacked widget and the actual frame represented
         image_layout = QVBoxLayout()
         image_layout.addWidget(self.stacked_widget)
-        image_layout.addWidget(self.frame_number)
-
-        # SLIDER to  change the image
-        slider_layout = QVBoxLayout()
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.valueChanged.connect(self.updateImageSlider)
-        slider_layout.addWidget(self.slider)
+        image_layout.addWidget(self.image_path_label)
         
         # LINES
         # a layout for the whole window, with the image on the left and the buttons on the right
@@ -320,42 +262,7 @@ class MainWindow(QMainWindow):
         # Set the widget as the central widget of the MainWindow
         self.setCentralWidget(main_widget)
 
-    # Given a path it loads images from a folder
-    def loadImagesFromSequence(self,sequence_path):
-        # Use QDir to get a list of image file names in the folder
-        print("SEQUENCE PATH",sequence_path)
-        mdir = QDir(sequence_path)
-        filters = ['*.jpg', '*.jpeg', '*.png','*.dcm']
-        mdir.setNameFilters(filters)
-        filenames = mdir.entryList()
-    
-        # Create a list of image paths from the filenames
-        paths = [f'{sequence_path}/{filename}' for filename in filenames]
-        #print(paths)
-        
-        # Just for debbuging
-        normal_images = []
-        dicom_images = []
-        
-        for path in paths:
-            _, ext = os.path.splitext(path)
-            if ext.lower() in ['.jpg', '.jpeg', '.png']:
-                normal_images.append(path)
-            elif ext.lower() == ".dcm":
-                dicom_images.append(path)
-        return normal_images, dicom_images
-
-    
-    # Method clearCoordinates
-    def clearCoordinates(self):
-        current_widget = self.stacked_widget.currentWidget()
-
-        if current_widget in self.labels.keys():
-            pixmap = self.labels[current_widget]
-            current_widget.setPixmap(pixmap)
-            
-    def save_coordinates(self):
-        return
+# ---------------------------------------------- BUTTONS AND SLIDER HANDLING --------------------------------------
 
     # Method showPrev - button previous
     def showPrev(self):
@@ -394,14 +301,17 @@ class MainWindow(QMainWindow):
         index = int(value * (len(image_paths) - 1) / 100)
         self.stacked_widget.setCurrentIndex(index)
         # Update the frame number
-        self.frame_number.setText(f"{index + 1}")
-    
-    #Datasets for the combobobox
+        self.frame_number.setText(f"{index + 1}")   
+# ---------------------------------------------- COMBOBOX AND TREE VIEW HANDLING --------------------------------------
+
+    #Subsets for the combobobox
     def getDirectories(self):
         # Use pathlib to get a list of all directories in the parent directory of the current pathh
         return [str(d) for d in Path(self.base_dir).iterdir() if d.is_dir()]
-    
+        
+
     # Tree View of each dataset, accordingly to the dataset choosen
+    # Gives the status for each sequence
     def add_folder_to_model(self, folder_path, parent_item, depth=0):
         folder = QDir(folder_path)
         folder.setFilter(QDir.Filter.NoDotAndDotDot | QDir.Filter.AllDirs | QDir.Filter.Files)
@@ -423,38 +333,18 @@ class MainWindow(QMainWindow):
                 if depth == 2:
                     status_item = QStandardItem()
                     status = self.get_status_for_sequence(child_path)
-                    status_item.setText(status)
+                    status_item.setText(str(status))
                     parent_item.setChild(child_item.row(),1,status_item)
-                    
-            #elif child_info.isFile():
-             #   child_item = QStandardItem(child_info.fileName())
-             #   parent_item.appendRow(child_item)
                 
-    # Status method that inform of the state of the landmarks annotated in the sequence, the state of the .json 
-    def get_status_for_sequence(self,sequence_path):
-        total_sequences = 0
-        annotated_sequences = 0
-
-        json_path = os.path.join(sequence_path, f"{os.path.basename(sequence_path)}.json")
-        #print(json_path)
-        if os.path.isfile(json_path):
-            total_sequences += 1
-            with open(json_path, "r") as json_file:
-                data = json.load(json_file)
-                if "dataset" in data and "individual" in data and "knee" in data and "sequence" in data and "frame" in data and "landmarks" in data and "coordinates" in data:
-                    annotated_sequences += 1
-                    total_sequences+=1
-                else:
-                    total_sequences+=1
-
-        return f"{annotated_sequences}/{total_sequences}"
     
+
     # Updates the tree givin the choice made in the combobox
     def update_tree_view(self,index):
         selected_dataset = self.choose_picture_comboboxSource.itemText(index)
         self.model.clear()
         self.model.setHorizontalHeaderLabels(['Folder', 'Status', 'Landmarks'])
         self.add_folder_to_model(selected_dataset, self.model.invisibleRootItem(), 0)
+        self.current_subset_path = selected_dataset
     
     # Choosing the sequence for a any individual to display
     def on_sequence_clicked(self,index):
@@ -465,52 +355,170 @@ class MainWindow(QMainWindow):
             parent = parent.parent()
         # Check if the clicked item is at depth == 2
         if depth == 2:
-            # print(f"Clicked on item at depth 2: {index.data()}")
             # Path of the clicked item
             item_path = self.get_sequence_path(index)
             print(f"Item path: {item_path}")
             # Update the display
             self.updateImageBox(item_path)
+
+            item_path = os.path.relpath(item_path, self.base_dir)
+            print('New path choosen', item_path)
+            self.update_image_path_label(item_path)
             
+            
+    # Given an index of the click
     def get_sequence_path(self,index):
         sequence_path_parts = []
         while index.isValid():
             sequence_path_parts.insert(0, index.data())
             index = index.parent()
-        sequence_path_parts.insert(0,self.root_path)
+        # sequence_path_parts.insert(0,self.current_subset_path)
+        sequence_path_parts.insert(0,self.current_subset_path)
         item_path = os.path.join(*sequence_path_parts)
         return item_path
     
+    # ----------------------------- STATUS OF LABELING ---------------------------------------
     
-    # TODO: Escolher o número de Landmarks
-    #       Ideia: Right click, left click remove
-    #       Definir um Max?       
+    
+    # TODO: de forma a obter o última sequence à qual foi feita o labeling, segundo a lógica vou realizando 
+    # as sequencias dentro do primeiro dataset, à medida que as sequências ficam feitas (o número correto e mínimo de landmarks é marcado) o status da
+    # respetiva sequência fica marcado a 1 (significando que está concluido). O método getCurrentSequence vai buscar a última sequência incompleta, i.e com o
+    # status a 0.
+    
+    # Vai começar a procurar sempre no self.base_dir
+    
+    # Get correct order of individual folders given a subset
+    def get_individual_folders(self, subset):
+        return sorted([os.path.join(subset, d) for d in os.listdir(subset) if os.path.isdir(os.path.join(subset, d))], key=lambda x: int(os.path.basename(x)))
 
+    # Get correct order of sequence folders of Individual Knee 
+    def get_sequence_folders(self, knee_folder):
+        return [os.path.join(knee_folder, seq) for seq in os.listdir(knee_folder) if os.path.isdir(os.path.join(knee_folder, seq))]
+
+    
+    # Status method that inform of the state of the landmarks annotated in the sequence, the state of the .json 
+    def get_status_for_sequence(self,sequence_path):
+        # sequence_path = D:/DataOrtho/DATASET_AXIAL_ANONYMOUS/94/RIGHT/pd_tse_fs_tra_12\ exemplo
+        json_path = os.path.join(sequence_path, f"{os.path.basename(sequence_path)}.json")
+        if os.path.isfile(json_path):
+            done=0
+            with open(json_path, "r") as json_file:
+                data = json.load(json_file)
+                if "dataset" in data and "individual" in data and "knee" in data and "sequence" in data and "frame" in data and "landmarks" in data and "coordinates" in data:
+                    done=1
+    
+        return done 
+    
+    def find_unchecked_sequence(self, sequence_folders):
+        for seq in sequence_folders:
+            if self.get_status_for_sequence(seq) == 0:
+                return seq
+        return ''
+    
+    # Method that follows the logic explained above, returns the state sequence and the subset (the first 0 sequence) 
+    def getCurrentSequence(self):
+        src_subsets = [os.path.join(self.base_dir, d) for d in os.listdir(self.base_dir) if os.path.isdir(os.path.join(self.base_dir, d))]
+        for subset in src_subsets:
+            individual_folders = self.get_individual_folders(subset)
+            for individual_folder in individual_folders:
+                for knee in ['LEFT', 'RIGHT']:
+                    knee_folder = os.path.join(individual_folder, knee)
+                    if os.path.exists(knee_folder):
+                        sequence_folders = self.get_sequence_folders(knee_folder) # gives the sequence folder of the 
+                        current = self.find_unchecked_sequence(sequence_folders) #
+                        if current:
+                            return current,subset
+                        
+                        
+        return '',''
+    
+    # Update of Individual info
+    def update_image_path_label(self, current_path):
+        components = []
+        tail = ''  # Initialize tail as an empty string
+        while tail is not None:
+            current_path, tail = os.path.split(current_path)
+            if tail:
+                components.insert(0, tail)
+            else:
+                tail = None  # Add this line to exit the loop when there's no more path to split
+
+        path_string = " - ".join(components)
+        self.image_path_label.setText(path_string)
+
+
+    
+        
+# ---------------------------------------------- IMAGE HANDLING --------------------------------------
+    
+    # Given a path it loads images from a folder
+    def loadImagesFromSequence(self,sequence_path):
+        # Use QDir to get a list of image file names in the folder
+        mdir = QDir(sequence_path)
+        filters = ['*.jpg', '*.jpeg', '*.png','*.dcm']
+        mdir.setNameFilters(filters)
+        filenames = mdir.entryList()
+    
+        # Create a list of image paths from the filenames
+        paths = [f'{sequence_path}/{filename}' for filename in filenames]
+        #print(paths)
+        
+        # Just for debbuging
+        normal_images = []
+        dicom_images = []
+        
+        for path in paths:
+            _, ext = os.path.splitext(path)
+            if ext.lower() in ['.jpg', '.jpeg', '.png']:
+                normal_images.append(path)
+            elif ext.lower() == ".dcm":
+                dicom_images.append(path)
+        return normal_images, dicom_images
+    
+    
     def updateImageBox(self,sequence_path):
+        # Removing the current widgets
         while self.stacked_widget.count() > 0:
             self.stacked_widget.removeWidget(self.stacked_widget.currentWidget())
-
-    # Load images from the sequence path
+        
+        # Load images from the sequence path
         normal_images, dicom_images = self.loadImagesFromSequence(sequence_path)
-
+        
         # Add images to the stacked_widget
         if dicom_images:
             for image_path in dicom_images:
                 ds = pydicom.dcmread(image_path)
-                canvas = ImageBox(self)
-                canvas.axes.imshow(ds.pixel_array, cmap='gray')
-                self.stacked_widget.addWidget(canvas)
+                image = ImageBox(self,ds,image_path)
+                self.stacked_widget.addWidget(image)
+            
         else:
             for image_path in normal_images:
                 ds = mpimg.imread(image_path)
-                canvas = ImageBox(self)
+                canvas = ImageBox(self,image_path)
                 canvas.axes.imshow(ds, cmap='gray')
                 self.stacked_widget.addWidget(canvas)
-                self.stacked_widget.setCurrentIndex(0)    
-                
- 
-        
-app = QApplication([])
-w = MainWindow()
-w.show()
-app.exec()
+                self.stacked_widget.setCurrentIndex(0) 
+    
+# ---------------------------------------------- TODO: LANDMARK HANDLING --------------------------------------
+    #  Escolher o número de Landmarks
+    #       Ideia: Right click, left click remove
+    #       Definir um Max? 
+    # Guardar em json e nos excels   
+    
+        # Method clearCoordinates
+    def clearCoordinates(self):
+        current_widget = self.stacked_widget.currentWidget()
+
+        if current_widget in self.labels.keys():
+            pixmap = self.labels[current_widget]
+            current_widget.setPixmap(pixmap)
+            
+    def save_coordinates(self):
+        return 
+
+
+if __name__ == "__main__":
+    app = QApplication([])
+    main_window = MainWindow()
+    main_window.show()
+    app.exec()
