@@ -15,21 +15,25 @@ from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
 import json
 import os
 import sys
+import string
 from pathlib import Path
 from styles import button_style, combo_style,frame_number_style,coordinates_box_style, instructions_style, tree_view_style,scrollbar_css
 
 
 
 class ImageBox(QLabel):
-    def __init__(self, parent,ds,image_path):
+    # Adicionar um max
+    def __init__(self, parent,ds,image_path,max_landmarks):
         super(ImageBox, self).__init__(parent)
         self.parent = parent
         self.setFixedSize(512, 512)
         self.setScaledContents(True)
         self.image_path = image_path
+        self.points = []
+        self.max_landmarks = max_landmarks
         self.load_dicom_image(ds)
 
-    
+    # Load of each time an ImageBox is created
     def load_dicom_image(self,ds):
         pixel_array = ds.pixel_array
 
@@ -48,17 +52,48 @@ class ImageBox(QLabel):
 
         self.setPixmap(pixmap)
     
-  
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            x = event.pos().x()
-            y = event.pos().y()
+    def remove_point(self,point):
+        return 
+    
+    def add_point(self, point):
+        self.points.append(point)
+        self.update()
+        # Update the point counter
+        self.parent.point_counter_label.setText(f"Points: {len(self.points)}")
 
-            self.parent.labels[self.image_path] = (x, y)
-            print(self.image_path, ': (', x, ',', y, ')')
-        else:
-            self.mousePressEventExtreme(event)
-      
+    def mousePressEvent(self, event):
+        x = event.pos().x()
+        y = event.pos().y()
+        
+        if event.button() == Qt.MouseButton.LeftButton:
+
+            if len(self.points) < self.max_landmarks:
+                self.parent.labels[self.image_path] = (x, y)
+                print('Added point in ', self.image_path, ': (', x, ',', y, ')')
+                self.add_point((x, y))
+            else:
+                print(f"Maximum number of landmarks reached! - {self.max_landmarks}")
+                self.parent.point_counter_label.setText(f"Maximum number of landmarks reached! - {self.max_landmarks}")
+        
+        elif event.button() == Qt.MouseButton.RightButton:
+            # Remove the closest point to the clicked position, if any
+            min_distance = float('inf')
+            closest_point_index = -1
+            
+            # finds the closest point, and removes it from the list of points
+            for i, point in enumerate(self.points):
+                distance = (point[0] - x) ** 2 + (point[1] - y) ** 2
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_point_index = i
+
+            if closest_point_index >= 0:
+                del self.points[closest_point_index]
+                self.update()
+                # Update the point counter
+                self.parent.point_counter_label.setText(f"Points: {len(self.points)}")
+            print('Removed point in ', self.image_path, ': (', x, ',', y, ')')
+
     # ver se a de cima está bem 
     def mousePressEventExtreme(self, event):
         current_widget = self.parent.stacked_widget.currentIndex()
@@ -94,7 +129,7 @@ class MainWindow(QMainWindow):
         self.current_sequence_path, self.current_subset_path = self.getCurrentSequence()    
         # Max number of landmarks too be appointed to each different dataset
         
-        self.max_landmarks = {'AXIAL':6,'SAGITTAL':6,'DYNAMIC':6}
+        self.max_landmarks = {'DATASET_AXIAL_ANONYMOUS':6,'DATASET_SAGITTAL_ANONYMOUS':6,'DATASET_DYNAMIC_ANONYMOUS':6}
         
     # ---------------------------------------------- GUI COMPONENTS --------------------------------------      
         #Individual info
@@ -123,7 +158,7 @@ class MainWindow(QMainWindow):
         self.instructions_box.setStyleSheet(instructions_style)
         self.instructions_box.setPlainText("frameLabelGUI:\n\n1. 'Next' and 'Previous' or slider buttons to navigate between images.\n2. Click on the image to mark a landmark.\n3. 'Clear Coordinates' button to remove landmarks.\n4. 'Save Coordinates' button to save the marked landmarks.")
 
-        
+
         # Add a number of Frame to localize in dataset 
         self.frame_number = QLabel()
         self.frame_number.setText("1")
@@ -144,7 +179,9 @@ class MainWindow(QMainWindow):
         if  self.dicom_paths:
             for image_path in self.dicom_paths:
                 ds = pydicom.dcmread(image_path)
-                image = ImageBox(self,ds,image_path)
+                image_type = self.image_type_max(image_path)
+                max_landmarks_for_type = self.max_landmarks[image_type]
+                image = ImageBox(self,ds,image_path,max_landmarks_for_type)
                 self.stacked_widget.addWidget(image)   
                 
         else:    
@@ -164,17 +201,6 @@ class MainWindow(QMainWindow):
         # Connect the buttons to custom slot methods
         self.prev_button.clicked.connect(self.showPrev)
         self.next_button.clicked.connect(self.showNext)
-        
-        # Clear Coordinates button
-        self.clear_button = QPushButton('Clear Coordinates', self)
-        self.clear_button.setStyleSheet(button_style)
-        self.clear_button.clicked.connect(self.clearCoordinates)
-        
-        # Save Coordinates button
-        self.save_button = QPushButton('Save Coordinates', self)
-        self.save_button.setStyleSheet(button_style)
-        # TODO: self.save_button.connect(self.SaveCoordinates) 
-        
 
         #  Source of patients data choice combobox Layout
         choose_data_layout = QVBoxLayout()
@@ -199,41 +225,57 @@ class MainWindow(QMainWindow):
         self.model = QStandardItemModel()
         self.tree_view.setModel(self.model)
         combined_css = tree_view_style + scrollbar_css
-        self.tree_view.setStyleSheet(combined_css)
-
-        
+        self.tree_view.setStyleSheet(combined_css)       
         self.tree_view.clicked.connect(self.on_sequence_clicked)
         self.model.setHorizontalHeaderLabels(['Folder','Status','Landmarks'])
         self.add_folder_to_model(self.current_subset_path, self.model.invisibleRootItem(),0)
-        choose_data_layout.addWidget(self.tree_view)
-    
-
-        # 'Previous' and 'Next' button 
-        btn_changeframe_layout = QHBoxLayout()
-        btn_changeframe_layout.addWidget(self.prev_button)
-        btn_changeframe_layout.addWidget(self.next_button)
+        choose_data_layout.addWidget(self.tree_view) 
         
-        # 'Save' and 'Clear' coordinates
-        btnframeState_layout = QHBoxLayout()
-        btnframeState_layout.addWidget(self.clear_button)
-        btnframeState_layout.addWidget(self.save_button)
-
-        # Left layout . Create a layout for the image and the stacked widget and the actual frame represented
-        image_layout = QVBoxLayout()
-        image_layout.addWidget(self.stacked_widget)
-        image_layout.addWidget(self.image_path_label)
+        # Clear Coordinates button
+        self.clear_button = QPushButton('Clear Coordinates', self)
+        self.clear_button.setStyleSheet(button_style)
+        self.clear_button.clicked.connect(self.clearLandmarks)
         
-        # LINES
-        # a layout for the whole window, with the image on the left and the buttons on the right
+        # Save Coordinates button
+        self.save_button = QPushButton('Save Coordinates', self)
+        self.save_button.setStyleSheet(button_style)
+        # TODO: self.save_button.connect(self.SaveCoordinates) 
+        
+        
+        # Landmark Points Counter
+        self.point_counter_label = QLabel()
+        self.point_counter_label.setText("Points: 0")
+        self.point_counter_label.setStyleSheet(frame_number_style)
+        self.point_counter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Lines
+        # line divider of layout for the whole window, with the image on the left and the buttons on the right
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        
+        # line divider of left or right layout
         line2 = QFrame()
         line2.setFrameShape(QFrame.Shape.HLine)
         line2.setFrameShadow(QFrame.Shadow.Raised)
         line2.setMidLineWidth(2)
-              
+        
+        # Layouts:     
+        # 'Previous' and 'Next' button Layouts
+        btn_changeframe_layout = QHBoxLayout()
+        btn_changeframe_layout.addWidget(self.prev_button)
+        btn_changeframe_layout.addWidget(self.next_button)
+        
+        # 'Save' and 'Clear' coordinates Layouts
+        btn_frameState_layout = QHBoxLayout()
+        btn_frameState_layout.addWidget(self.clear_button)
+        btn_frameState_layout.addWidget(self.save_button)
+        
+        # Layout for the image and the stacked widget and the actual frame represented
+        image_layout = QVBoxLayout()
+        image_layout.addWidget(self.stacked_widget)
+        image_layout.addWidget(self.point_counter_label)
+        image_layout.addWidget(self.image_path_label)
+            
         # The Right layout
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(5, 5, 5, 5)
@@ -247,7 +289,7 @@ class MainWindow(QMainWindow):
         right_layout.addStretch(1)
         
         right_layout.addWidget(self.coordinates_box)
-        right_layout.addLayout(btnframeState_layout)
+        right_layout.addLayout(btn_frameState_layout)
              
         # Main Layout
         main_layout = QHBoxLayout()
@@ -359,7 +401,7 @@ class MainWindow(QMainWindow):
             item_path = self.get_sequence_path(index)
             print(f"Item path: {item_path}")
             # Update the display
-            self.updateImageBox(item_path)
+            self.update_stacked_widget_imagebox(item_path)
 
             item_path = os.path.relpath(item_path, self.base_dir)
             print('New path choosen', item_path)
@@ -379,8 +421,7 @@ class MainWindow(QMainWindow):
     
     # ----------------------------- STATUS OF LABELING ---------------------------------------
     
-    
-    # TODO: de forma a obter o última sequence à qual foi feita o labeling, segundo a lógica vou realizando 
+    # TODO: BASICAMENTE CONCLUIDO (TESTAR) De forma a obter o última sequence à qual foi feita o labeling, segundo a lógica vou realizando 
     # as sequencias dentro do primeiro dataset, à medida que as sequências ficam feitas (o número correto e mínimo de landmarks é marcado) o status da
     # respetiva sequência fica marcado a 1 (significando que está concluido). O método getCurrentSequence vai buscar a última sequência incompleta, i.e com o
     # status a 0.
@@ -409,7 +450,8 @@ class MainWindow(QMainWindow):
     
         return done 
     
-    def find_unchecked_sequence(self, sequence_folders):
+    # Finds the first unchecked sequence
+    def find_first_unchecked_sequence(self, sequence_folders):
         for seq in sequence_folders:
             if self.get_status_for_sequence(seq) == 0:
                 return seq
@@ -425,7 +467,7 @@ class MainWindow(QMainWindow):
                     knee_folder = os.path.join(individual_folder, knee)
                     if os.path.exists(knee_folder):
                         sequence_folders = self.get_sequence_folders(knee_folder) # gives the sequence folder of the 
-                        current = self.find_unchecked_sequence(sequence_folders) #
+                        current = self.find_first_unchecked_sequence(sequence_folders) #
                         if current:
                             return current,subset
                         
@@ -458,15 +500,13 @@ class MainWindow(QMainWindow):
         filters = ['*.jpg', '*.jpeg', '*.png','*.dcm']
         mdir.setNameFilters(filters)
         filenames = mdir.entryList()
-    
-        # Create a list of image paths from the filenames
+       # Create a list of image paths from the filenames
         paths = [f'{sequence_path}/{filename}' for filename in filenames]
         #print(paths)
         
         # Just for debbuging
         normal_images = []
         dicom_images = []
-        
         for path in paths:
             _, ext = os.path.splitext(path)
             if ext.lower() in ['.jpg', '.jpeg', '.png']:
@@ -475,9 +515,9 @@ class MainWindow(QMainWindow):
                 dicom_images.append(path)
         return normal_images, dicom_images
     
-    
-    def updateImageBox(self,sequence_path):
-        # Removing the current widgets
+    # Update the stacked widget the the new 
+    def update_stacked_widget_imagebox(self,sequence_path):
+        # remove the current widgets
         while self.stacked_widget.count() > 0:
             self.stacked_widget.removeWidget(self.stacked_widget.currentWidget())
         
@@ -501,21 +541,31 @@ class MainWindow(QMainWindow):
     
 # ---------------------------------------------- TODO: LANDMARK HANDLING --------------------------------------
     #  Escolher o número de Landmarks
-    #       Ideia: Right click, left click remove
-    #       Definir um Max? 
-    # Guardar em json e nos excels   
+    #       Right click add, left Click remove - done
+    #       Definir um Max - done
+    #       Guardar em json e excels, nos respetivos paths corretos  
     
-        # Method clearCoordinates
-    def clearCoordinates(self):
+    # Method that returns the max for correspondent subset of DataOrtho
+    def image_type_max(self,image_path):
+        # path relative to the base directory
+        rel_path = os.path.relpath(image_path, self.base_dir)
+        # split the path into parts
+        parts = rel_path.split(os.path.sep)
+        # get the the subset of DataOrtho name containing the type
+        image_type = parts[0]
+        return image_type
+    
+    # Method clearLandmarks
+    def clearLandmarks(self):
         current_widget = self.stacked_widget.currentWidget()
 
         if current_widget in self.labels.keys():
             pixmap = self.labels[current_widget]
             current_widget.setPixmap(pixmap)
             
-    def save_coordinates(self):
+    # Method saveLandmarks  - logic implemented    
+    def saveLandmarks(self):
         return 
-
 
 if __name__ == "__main__":
     app = QApplication([])
