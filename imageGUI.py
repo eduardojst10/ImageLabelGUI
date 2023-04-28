@@ -2,10 +2,10 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QApplication,QLabel,QComboBox, QPlainTextEdit,QFrame,
     QStackedWidget,QPushButton,QWidget, QSlider,QHBoxLayout,QVBoxLayout,QTextEdit,
-    QTreeView, QAbstractItemView
+    QTreeView, QAbstractItemView, QMessageBox,  QSizePolicy
 )
-from PyQt6.QtGui import QPixmap, QStandardItemModel, QStandardItem
-from PyQt6.QtCore import Qt, QDir,QFileInfo, QSize, QStandardPaths
+from PyQt6.QtGui import QPixmap, QStandardItemModel, QStandardItem, QPainter, QPen, QColor, QFont, QImageReader 
+from PyQt6.QtCore import Qt, QDir,QFileInfo, QPoint
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 60})
@@ -13,12 +13,14 @@ from PIL import Image, ImageQt
 import pydicom
 from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
 import json
-import os
-import sys
+import openpyxl
+import pandas as pd
+from openpyxl import load_workbook
 import string
+import os
+import re
 from pathlib import Path
 from styles import button_style, combo_style,frame_number_style,coordinates_box_style, instructions_style, tree_view_style,scrollbar_css
-
 
 
 class ImageBox(QLabel):
@@ -26,22 +28,29 @@ class ImageBox(QLabel):
     def __init__(self, parent,ds,image_path,max_landmarks):
         super(ImageBox, self).__init__(parent)
         self.parent = parent
+        #self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedSize(512, 512)
-        self.setScaledContents(True)
+        self.setScaledContents(True) #????
         self.image_path = image_path
         self.points = []
         self.max_landmarks = max_landmarks
-        self.load_dicom_image(ds)
+        self.ds = ds
+        self.load_dicom_image()
+        self.frame_number = self.extract_frame_number(image_path)
+        
+        
+        # Set the size policy
+        self.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred))
 
     # Load of each time an ImageBox is created
-    def load_dicom_image(self,ds):
-        pixel_array = ds.pixel_array
+    def load_dicom_image(self):
+        pixel_array = self.ds.pixel_array
 
         # Apply the Modality LUT if present
-        pixel_array = apply_modality_lut(pixel_array, ds)
+        pixel_array = apply_modality_lut(pixel_array, self.ds)
 
         # Apply the VOI LUT if present
-        pixel_array = apply_voi_lut(pixel_array, ds)
+        pixel_array = apply_voi_lut(pixel_array, self.ds)
 
         # Normalize the pixel array
         pixel_array = ((pixel_array - pixel_array.min()) * (255.0 / (pixel_array.max() - pixel_array.min()))).astype('uint8')
@@ -49,107 +58,151 @@ class ImageBox(QLabel):
         pil_image = Image.fromarray(pixel_array)
         qt_image = ImageQt.ImageQt(pil_image)
         pixmap = QPixmap.fromImage(qt_image)
-
+        # TODO:
+        #self.setFixedSize(pixel_array.shape[0], pixel_array.shape[1])
         self.setPixmap(pixmap)
+
+        
+
+    # Remove point 
+    def remove_point(self,x,y):
+        min_distance = float('inf')
+        closest_point_index = -1
+        
+        # finds the closest point, and removes it from the list of points
+        for i, point in enumerate(self.points):
+            distance = (point[0] - x) ** 2 + (point[1] - y) ** 2
+            if distance < min_distance:
+                min_distance = distance
+                closest_point_index = i
+
+        if closest_point_index >= 0:
+            del self.points[closest_point_index]
+            self.update()
+            # Update the point counter
+            self.parent.point_counter_label.setText(f"Points: {len(self.points)}")
+        print('Removed point in ', self.image_path, ': (', x, ',', y, ')')
     
-    def remove_point(self,point):
-        return 
-    
+    # Add point
     def add_point(self, point):
         self.points.append(point)
         self.update()
         # Update the point counter
         self.parent.point_counter_label.setText(f"Points: {len(self.points)}")
-
+    
+    
+    # Mouse click handling
     def mousePressEvent(self, event):
         x = event.pos().x()
-        y = event.pos().y()
-        
+        y = event.pos().y() 
+        self.parent.current_sequence = self.image_path
         if event.button() == Qt.MouseButton.LeftButton:
 
             if len(self.points) < self.max_landmarks:
-                self.parent.labels[self.image_path] = (x, y)
+                self.parent.current_landmarks[self.image_path] = (x, y)
                 print('Added point in ', self.image_path, ': (', x, ',', y, ')')
                 self.add_point((x, y))
+                self.parent.next_help_image()
             else:
                 print(f"Maximum number of landmarks reached! - {self.max_landmarks}")
                 self.parent.point_counter_label.setText(f"Maximum number of landmarks reached! - {self.max_landmarks}")
         
         elif event.button() == Qt.MouseButton.RightButton:
             # Remove the closest point to the clicked position, if any
-            min_distance = float('inf')
-            closest_point_index = -1
+            self.remove_point(x, y)
+     
+    # Extracts the frame number of a dicom file from path   
+    def extract_frame_number(self, file_path):
+        file_name = os.path.basename(file_path)
+        match = re.search(r"IM-\d{4}-(\d{4}).dcm", file_name)
+        if match:
+            return int(match.group(1))
+        else:
+            return None
+    
+    # Draw kandmarks marked
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        # Set up the pen for drawing points
+        # 42, 120, 172       
+        painter.setPen(QPen(QColor(228, 228, 52), 1))
+        for point in self.points:
+            painter.drawPoint(QPoint(point[0], point[1]))
+
+        # Set up the pen and font for drawing the circle and index text
+        painter.setPen(QPen(Qt.GlobalColor.blue, 2))
+        painter.setBrush(Qt.GlobalColor.blue)
+        # Set the font size
+        font = QFont()
+        font.setPointSize(6)
+        # font = painter.font()
+        # font.setPixelSize(14)
+        painter.setFont(font)
+
+        for index, point in enumerate(self.points, start=1):
+            x, y = point
+            radius = 5
+            painter.drawEllipse(QPoint(x, y), radius, radius)
+            painter.setPen(QPen(Qt.GlobalColor.white, 1))
+            painter.drawText(QPoint(x - 2, y + 2), str(index))
+            painter.setPen(QPen(Qt.GlobalColor.blue, 1))
             
-            # finds the closest point, and removes it from the list of points
-            for i, point in enumerate(self.points):
-                distance = (point[0] - x) ** 2 + (point[1] - y) ** 2
-                if distance < min_distance:
-                    min_distance = distance
-                    closest_point_index = i
-
-            if closest_point_index >= 0:
-                del self.points[closest_point_index]
-                self.update()
-                # Update the point counter
-                self.parent.point_counter_label.setText(f"Points: {len(self.points)}")
-            print('Removed point in ', self.image_path, ': (', x, ',', y, ')')
-
-    # ver se a de cima está bem 
-    def mousePressEventExtreme(self, event):
-        current_widget = self.parent.stacked_widget.currentIndex()
-        current_widget_obj = self.parent.stacked_widget.widget(current_widget)
-        # Get the mouse click position relative to the current image widget
-        x = event.pos().x() - current_widget_obj.pos().x()
-        y = event.pos().y() - current_widget_obj.pos().y()
-
-        # Transform the coordinates to the image space
-        x_img = (x - self.offset_x) * self.scale_x
-        y_img = (y - self.offset_y) * self.scale_y
-
-        image_path = self.image_path
-        self.parent.labels[image_path] = (x_img, y_img)
-        print(self.image_path,': (',x,',',y,')')
             
         
 # Subclass QMainWindow to customize your application's main window
 class MainWindow(QMainWindow):
-
     def __init__(self):
         super().__init__()
         # Name Window
         self.setWindowTitle("frameLabelGUI")
         # Background color
         self.setStyleSheet('background-color:#37516b;') 
-    # ---------------------------------------------- Default Vars --------------------------------------
-        
+# ---------------------------------------------- Default Vars --------------------------------------
+       
         self.base_dir = 'D:/DataOrtho/'
-
-        
+        self.excel_paths = {'DATASET_AXIAL_ANONYMOUS': 'D:/DataOrtho/DATASET_AXIAL_ANONYMOUS/dataset_axial_anonymous.xlsx', 
+                            'DATASET_SAGITTAL_ANONYMOUS': 'D:/DataOrtho/DATASET_SAGITTAL_ANONYMOUS/dataset_sagittal_anonymous.xlsx',
+                            'DATASET_DYNAMIC_ANONYMOUS': 'D:/DataOrtho/DATASET_DYNAMIC_ANONYMOUS/dataset_dynamic_anonymous.xlsx'}
         # First Current path is decided by current state 
-        self.current_sequence_path, self.current_subset_path = self.getCurrentSequence()    
-        # Max number of landmarks too be appointed to each different dataset
+        self.current_sequence_path, self.current_subset_path = self.getCurrentSequence() 
+        # Max number of landmarks too be appointed to each different dataset  
+        self.max_landmarks = {'DATASET_AXIAL_ANONYMOUS':11,'DATASET_SAGITTAL_ANONYMOUS':6,'DATASET_DYNAMIC_ANONYMOUS':6}      
         
-        self.max_landmarks = {'DATASET_AXIAL_ANONYMOUS':6,'DATASET_SAGITTAL_ANONYMOUS':6,'DATASET_DYNAMIC_ANONYMOUS':6}
+        self.help_image_index = 0
+        self.help_images = []
+        # Load the help images
         
-    # ---------------------------------------------- GUI COMPONENTS --------------------------------------      
+# ---------------------------------------------- GUI COMPONENTS --------------------------------------      
+        
         #Individual info
-        self.image_path_label = QLabel()
-        #self.image_path_label.setText(self.dicom_paths[0])
+        self.image_path_label = QLabel(self)
         self.image_path_label.setStyleSheet(frame_number_style)
         self.image_path_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Updating the image_path_label
         self.update_image_path_label(self.current_sequence_path)
         
-        
         # To hold multiple Images/Frames
         self.stacked_widget = QStackedWidget(self)
-        self.labels = {}
+        self.stacked_widget.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding))
+        # Dict that holds the landmarks marked and its sequence frames information associated
+        self.current_landmarks = {}
         
-        # Box to display marked landmarks
+        # Help layout
+        help_layout = QHBoxLayout()
+        # Read-only textbox for displaying coordinates
         self.coordinates_box = QPlainTextEdit(self)
         self.coordinates_box.setReadOnly(True)
-        self.coordinates_box.setMaximumHeight(150)
+        self.coordinates_box.setMaximumWidth(150)
         self.coordinates_box.setStyleSheet(coordinates_box_style)
+        help_layout.addWidget(self.coordinates_box)
+
+        # Image holder (QLabel)
+        self.image_holder = QLabel(self)
+        self.image_holder.setFixedSize(234, 234)
+        self.image_holder.setScaledContents(True)
+        self.load_help_images('D:\DataOrthoHelp\Axial Landmarks\LEFT')
+        help_layout.addWidget(self.image_holder)
         
         # Box to display instructions
         self.instructions_box = QTextEdit(self)
@@ -157,29 +210,28 @@ class MainWindow(QMainWindow):
         self.instructions_box.setMaximumHeight(150)
         self.instructions_box.setStyleSheet(instructions_style)
         self.instructions_box.setPlainText("frameLabelGUI:\n\n1. 'Next' and 'Previous' or slider buttons to navigate between images.\n2. Click on the image to mark a landmark.\n3. 'Clear Coordinates' button to remove landmarks.\n4. 'Save Coordinates' button to save the marked landmarks.")
-
-
+        
         # Add a number of Frame to localize in dataset 
         self.frame_number = QLabel()
-        self.frame_number.setText("1")
+        #self.frame_number.setText("1")
         self.frame_number.setStyleSheet(frame_number_style)
         self.frame_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Slider to  change the image
         slider_layout = QVBoxLayout()
         self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.valueChanged.connect(self.updateImageSlider)
+        # self.slider.valueChanged.connect(self.updateImageSlider)
         slider_layout.addWidget(self.slider)
         slider_layout.addWidget(self.frame_number)
 
         # self.normal_image_paths debug
         self.normal_image_paths,self.dicom_paths = self.loadImagesFromSequence(self.current_sequence_path)        
        
-        # Image paths received from loadImagesFromSequence
+        # Image paths received from loadImagesFromSequence - loadImagesFromSequence used once
         if  self.dicom_paths:
             for image_path in self.dicom_paths:
                 ds = pydicom.dcmread(image_path)
-                image_type = self.image_type_max(image_path)
+                image_type = self.get_image_type(image_path)
                 max_landmarks_for_type = self.max_landmarks[image_type]
                 image = ImageBox(self,ds,image_path,max_landmarks_for_type)
                 self.stacked_widget.addWidget(image)   
@@ -220,9 +272,8 @@ class MainWindow(QMainWindow):
         
         # Tree View - implementar QTreeView para status de data gathering and so on
         self.tree_view = QTreeView(self)
-        self.tree_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        # setting up the file system model
         self.model = QStandardItemModel()
+        self.tree_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tree_view.setModel(self.model)
         combined_css = tree_view_style + scrollbar_css
         self.tree_view.setStyleSheet(combined_css)       
@@ -239,7 +290,7 @@ class MainWindow(QMainWindow):
         # Save Coordinates button
         self.save_button = QPushButton('Save Coordinates', self)
         self.save_button.setStyleSheet(button_style)
-        # TODO: self.save_button.connect(self.SaveCoordinates) 
+        self.save_button.clicked.connect(self.saveLandmarks) 
         
         
         # Landmark Points Counter
@@ -271,24 +322,23 @@ class MainWindow(QMainWindow):
         btn_frameState_layout.addWidget(self.save_button)
         
         # Layout for the image and the stacked widget and the actual frame represented
+        # TODO: Verificar se o display preserva as dimensões da imagebox 
         image_layout = QVBoxLayout()
-        image_layout.addWidget(self.stacked_widget)
+        image_layout.addWidget(self.stacked_widget,alignment=Qt.AlignmentFlag.AlignCenter)
+        #image_layout.addStretch(1)
         image_layout.addWidget(self.point_counter_label)
         image_layout.addWidget(self.image_path_label)
             
-        # The Right layout
+        # The Right layout - choose_data_layout, slider_layout, and buttons to the right_layout
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(5, 5, 5, 5)
-
-        # Add choose_data_layout, slider_layout, and buttons to the right_layout
         right_layout.addWidget(self.instructions_box)
         right_layout.addLayout(choose_data_layout)
         right_layout.addWidget(line2)
         right_layout.addLayout(btn_changeframe_layout)
         right_layout.addLayout(slider_layout)
         right_layout.addStretch(1)
-        
-        right_layout.addWidget(self.coordinates_box)
+        right_layout.addLayout(help_layout)
         right_layout.addLayout(btn_frameState_layout)
              
         # Main Layout
@@ -300,12 +350,10 @@ class MainWindow(QMainWindow):
         # Widget to hold the Main Layout
         main_widget = QWidget()
         main_widget.setLayout(main_layout)
-
         # Set the widget as the central widget of the MainWindow
         self.setCentralWidget(main_widget)
 
 # ---------------------------------------------- BUTTONS AND SLIDER HANDLING --------------------------------------
-
     # Method showPrev - button previous
     def showPrev(self):
         # Decrement the current index of the stacked widget
@@ -313,12 +361,17 @@ class MainWindow(QMainWindow):
         new_index = current_index - 1 if current_index > 0 else self.stacked_widget.count() - 1
         self.stacked_widget.setCurrentIndex(new_index)
         
-        # Update the frame number
+        # update the frame number
         self.frame_number.setText(f"{new_index + 1}")
         
-        # Update the slider value
+        # update the slider value
         slider_value = int((new_index / (self.stacked_widget.count()-1))*100)
         self.slider.setValue(slider_value)
+        
+        # update the image path label and point counter label
+        current_widget = self.stacked_widget.currentWidget()
+        self.update_image_path_label(current_widget.image_path)
+        self.point_counter_label.setText(f"Points: {len(current_widget.points)}")
         
     # Method showNext - button next
     def showNext(self):
@@ -326,12 +379,18 @@ class MainWindow(QMainWindow):
         current_index = self.stacked_widget.currentIndex()
         new_index = (current_index + 1) % self.stacked_widget.count()
         self.stacked_widget.setCurrentIndex(new_index)
+        
         # Update the slider value
         slider_value = int((new_index / (self.stacked_widget.count()-1))*100)
         self.slider.setValue(slider_value)
                
         # Update the frame number
         self.frame_number.setText(f"{new_index + 1}")
+        
+        # Update the image path label and point counter label
+        current_widget = self.stacked_widget.currentWidget()
+        self.update_image_path_label(current_widget.image_path)
+        self.point_counter_label.setText(f"Points: {len(current_widget.points)}")
         
     # Method updateImage - slider component
     def updateImageSlider(self, value):
@@ -342,15 +401,20 @@ class MainWindow(QMainWindow):
             image_paths = self.dicom_paths
         index = int(value * (len(image_paths) - 1) / 100)
         self.stacked_widget.setCurrentIndex(index)
+        
         # Update the frame number
-        self.frame_number.setText(f"{index + 1}")   
+        self.frame_number.setText(f"{index + 1}") 
+
+        # Update the image path label and point counter label
+        current_widget = self.stacked_widget.currentWidget()
+        self.update_image_path_label(current_widget.image_path)
+        self.point_counter_label.setText(f"Points: {len(current_widget.points)}")  
 # ---------------------------------------------- COMBOBOX AND TREE VIEW HANDLING --------------------------------------
 
     #Subsets for the combobobox
     def getDirectories(self):
         # Use pathlib to get a list of all directories in the parent directory of the current pathh
-        return [str(d) for d in Path(self.base_dir).iterdir() if d.is_dir()]
-        
+        return [str(d) for d in Path(self.base_dir).iterdir() if d.is_dir()]      
 
     # Tree View of each dataset, accordingly to the dataset choosen
     # Gives the status for each sequence
@@ -358,7 +422,8 @@ class MainWindow(QMainWindow):
         folder = QDir(folder_path)
         folder.setFilter(QDir.Filter.NoDotAndDotDot | QDir.Filter.AllDirs | QDir.Filter.Files)
         
-        entry_list = folder.entryList()       
+        entry_list = folder.entryList()
+        entry_list = [entry for entry in entry_list if QFileInfo(folder.filePath(entry)).isDir()]       
         if depth == 0:
             entry_list = sorted(entry_list, key=lambda x: int(x))
             
@@ -376,9 +441,7 @@ class MainWindow(QMainWindow):
                     status_item = QStandardItem()
                     status = self.get_status_for_sequence(child_path)
                     status_item.setText(str(status))
-                    parent_item.setChild(child_item.row(),1,status_item)
-                
-    
+                    parent_item.setChild(child_item.row(),1,status_item)                
 
     # Updates the tree givin the choice made in the combobox
     def update_tree_view(self,index):
@@ -421,7 +484,7 @@ class MainWindow(QMainWindow):
     
     # ----------------------------- STATUS OF LABELING ---------------------------------------
     
-    # TODO: BASICAMENTE CONCLUIDO (TESTAR) De forma a obter o última sequence à qual foi feita o labeling, segundo a lógica vou realizando 
+    # TODO: VER CASOS EXTREMOS - De forma a obter o última sequence à qual foi feita o labeling, segundo a lógica vou realizando 
     # as sequencias dentro do primeiro dataset, à medida que as sequências ficam feitas (o número correto e mínimo de landmarks é marcado) o status da
     # respetiva sequência fica marcado a 1 (significando que está concluido). O método getCurrentSequence vai buscar a última sequência incompleta, i.e com o
     # status a 0.
@@ -435,7 +498,6 @@ class MainWindow(QMainWindow):
     # Get correct order of sequence folders of Individual Knee 
     def get_sequence_folders(self, knee_folder):
         return [os.path.join(knee_folder, seq) for seq in os.listdir(knee_folder) if os.path.isdir(os.path.join(knee_folder, seq))]
-
     
     # Status method that inform of the state of the landmarks annotated in the sequence, the state of the .json 
     def get_status_for_sequence(self,sequence_path):
@@ -445,7 +507,7 @@ class MainWindow(QMainWindow):
             done=0
             with open(json_path, "r") as json_file:
                 data = json.load(json_file)
-                if "dataset" in data and "individual" in data and "knee" in data and "sequence" in data and "frame" in data and "landmarks" in data and "coordinates" in data:
+                if "Dataset" in data and "Individual" in data and "Knee" in data and "Sequence" in data and "Frame" in data and "#Landmarks" in data and "Landmarks" in data:
                     done=1
     
         return done 
@@ -469,12 +531,16 @@ class MainWindow(QMainWindow):
                         sequence_folders = self.get_sequence_folders(knee_folder) # gives the sequence folder of the 
                         current = self.find_first_unchecked_sequence(sequence_folders) #
                         if current:
-                            return current,subset
-                        
-                        
+                            # Get the first .dcm file within the sequence folder
+                            # dcm_files = [f for f in os.listdir(current) if f.endswith('.dcm')]
+                            #if dcm_files:
+                            #    first_dcm_file = os.path.join(current, dcm_files[0])
+                            return current, subset
+                                
         return '',''
+
     
-    # Update of Individual info
+    # Update of Individual info on Individual label
     def update_image_path_label(self, current_path):
         components = []
         tail = ''  # Initialize tail as an empty string
@@ -487,12 +553,9 @@ class MainWindow(QMainWindow):
 
         path_string = " - ".join(components)
         self.image_path_label.setText(path_string)
-
-
-    
         
-# ---------------------------------------------- IMAGE HANDLING --------------------------------------
-    
+# ---------------------------------------------- IMAGE HANDLING (IMAGEBOX and HELP)-------------------------------------- 
+
     # Given a path it loads images from a folder
     def loadImagesFromSequence(self,sequence_path):
         # Use QDir to get a list of image file names in the folder
@@ -528,7 +591,9 @@ class MainWindow(QMainWindow):
         if dicom_images:
             for image_path in dicom_images:
                 ds = pydicom.dcmread(image_path)
-                image = ImageBox(self,ds,image_path)
+                image_type = self.get_image_type(image_path)
+                max_landmarks_for_type = self.max_landmarks[image_type]
+                image = ImageBox(self,ds,image_path,max_landmarks_for_type)
                 self.stacked_widget.addWidget(image)
             
         else:
@@ -538,15 +603,40 @@ class MainWindow(QMainWindow):
                 canvas.axes.imshow(ds, cmap='gray')
                 self.stacked_widget.addWidget(canvas)
                 self.stacked_widget.setCurrentIndex(0) 
+                
+    def load_image(self, image_path):
+        reader = QImageReader(image_path)
+        image = reader.read()
+        pixmap = QPixmap.fromImage(image)
+        return pixmap
     
-# ---------------------------------------------- TODO: LANDMARK HANDLING --------------------------------------
+    def load_help_images(self, folder_path):
+        # Add all image paths in the help folder to the help_images list
+        file_paths = sorted(os.listdir(folder_path))
+        for file_path in file_paths:
+            if file_path.endswith(".png"):
+                self.help_images.append(os.path.join(folder_path, file_path))
+
+        # Set the first help image in the image holder
+        if len(self.help_images) > 0:
+            pixmap = self.load_image(self.help_images[0])
+            self.image_holder.setPixmap(pixmap)
+
+    def next_help_image(self):
+        self.help_image_index += 1
+        if self.help_image_index >= len(self.help_images):
+            self.help_image_index = 0
+        pixmap = self.load_image(self.help_images[self.help_image_index])
+        self.image_holder.setPixmap(pixmap)
+    
+# ---------------------------------------------- LANDMARK HANDLING --------------------------------------
     #  Escolher o número de Landmarks
     #       Right click add, left Click remove - done
     #       Definir um Max - done
     #       Guardar em json e excels, nos respetivos paths corretos  
     
-    # Method that returns the max for correspondent subset of DataOrtho
-    def image_type_max(self,image_path):
+    # Method that returns the key for max_landmarks, a subset key for a max.
+    def get_image_type(self,image_path):
         # path relative to the base directory
         rel_path = os.path.relpath(image_path, self.base_dir)
         # split the path into parts
@@ -555,20 +645,98 @@ class MainWindow(QMainWindow):
         image_type = parts[0]
         return image_type
     
+    # Specific string required - TODO: Mesh with other related function
+    # example "A:/DATASET_ALL/DATASET_AXIAL_ANONYMOUS/1/LEFT/pd_tse_fs_tra_320_3/IM-0001-0001.dcm"
+    def extract_components(self,image_path):
+        # Define the regex pattern
+        pattern = r"(?P<Dataset>DATASET_\w+_ANONYMOUS)[\\/](?P<Individual>\d+)[\\/](?P<Knee>LEFT|RIGHT)[\\/](?P<Sequence>[\w-]+)[\\/]"
+
+        # Find the match using the regex pattern
+        match = re.search(pattern, image_path)
+
+        # If there's a match, return the matched groups as a dictionary
+        if match:
+            return match.groupdict()
+        else:
+            return None
+        
     # Method clearLandmarks
     def clearLandmarks(self):
         current_widget = self.stacked_widget.currentWidget()
-
-        if current_widget in self.labels.keys():
-            pixmap = self.labels[current_widget]
-            current_widget.setPixmap(pixmap)
+        current_widget.points = []
+        current_widget.update()
+        self.point_counter_label.setText(f"Points: {len(current_widget.points)}")
             
     # Method saveLandmarks  - logic implemented    
     def saveLandmarks(self):
-        return 
+        if not self.all_landmarks_marked():
+            QMessageBox.warning(self,"Warning", "Mark all landmarks before saving.")
+            return
+        
+        self.update_landmarks_files()
+        QMessageBox.information(self, "Success", "Points saved successfully.")
+        
+    # Check if all max landmarks are marked
+    def all_landmarks_marked(self):
+        current_image_widget = self.stacked_widget.currentWidget()
+        return len(current_image_widget.points) == current_image_widget.max_landmarks
+    
+    # Update the landmarks marked to the appropriate paths
+    # TODO: dar update do status da sequence para a tree view
+    def update_landmarks_files(self):
+        # get do current path para campos de json
+        sequence_folder = self.current_sequence_path
+        json_file = os.path.join(sequence_folder, f"{os.path.basename(sequence_folder)}.json")
+        print('Sequence:', sequence_folder)
+        current_image_widget = self.stacked_widget.currentWidget()
+        frame_number = current_image_widget.frame_number
+        landmarks = current_image_widget.points
+        dataset = self.get_image_type(self.current_sequence_path)
+        # Get the full path because
+        full_path = current_image_widget.image_path
+        info = self.extract_components(full_path)
+        individual = info['Individual']
+        knee = info['Knee']
+        sequence = info['Sequence']
+        
+        data = {
+            "Dataset": dataset,
+            "Individual":individual,
+            "Knee": knee,
+            "Sequence": sequence,
+            "Frame": frame_number,
+            "#Landmarks": self.max_landmarks[dataset],
+            "Landmarks": landmarks
+        }
+        with open(json_file, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
 
+        # Find the correct subset DataFrame
+        excel_file_path = self.excel_paths[dataset]
+        
+        subset_df = pd.read_excel(excel_file_path)
+        # checking if the sequence exists in the DataFrame
+        sequence_exists = subset_df['Sequence'].isin([sequence]).any()
+
+        if sequence_exists:
+            # Update the existing row
+            for key, value in data.items():
+                if key not in ["image_paths", "landmark_points", "comments", "Landmarks"]:
+                    subset_df.loc[subset_df['Sequence'] == sequence, key] = str(value)
+            subset_df.loc[subset_df['Sequence'] == sequence, 'Landmarks'] = str(landmarks)
+        else:
+            # Add the new sequence row with the data
+            subset_df = pd.concat([subset_df, pd.DataFrame([data])], ignore_index=True)
+
+        
+        # update landmarks
+        subset_df.loc[subset_df['Sequence'] == sequence, 'Landmarks'] = str(landmarks)
+        with pd.ExcelWriter(excel_file_path) as writer:
+            subset_df.to_excel(writer, index=False)
+    
 if __name__ == "__main__":
     app = QApplication([])
     main_window = MainWindow()
+    #main_window.showFullScreen()
     main_window.show()
     app.exec()
