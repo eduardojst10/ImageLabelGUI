@@ -6,14 +6,14 @@ import json
 
 
 # Set the path to the dataset folder
-dataset_path = "D:/DataOrtho/DATASET_AXIAL_ANONYMOUS"
+dataset_path = "PATH/TO/DESIRED/DATASET"
 
 # Iterate through the individual folders
 for individual in os.listdir(dataset_path):
     individual_path = os.path.join(dataset_path, individual)
     
     if os.path.isdir(individual_path):
-        # Iterate through the knee folders (LEFT and RIGHT)
+        # Iterate through the knee folders (LEFT or RIGHT)
         # print(individual_path)
         for knee in os.listdir(individual_path):
             knee_path = os.path.join(individual_path, knee)

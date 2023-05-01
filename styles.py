@@ -16,7 +16,7 @@ button_style = '''
             border-radius: 5px;
         }
         QPushButton:hover {
-            background-color: #2A78AC; /* Dark green */
+            background-color: #2A78AC; 
         }
         '''
 # CSS for ComboBox
@@ -63,14 +63,14 @@ frame_number_style = '''
                 border-radius: 2px;
                 text-align: center;
                 padding: 5px 10px;
-                margin: 10px;
-                min-width: 60px;
-                min-height: 30px;
+                margin: 5px;
+                min-width: 10px;
+                min-height: 10px;
             }
         '''
         
 coordinates_box_style = '''
-            QPlainTextEdit{
+            QTextEdit{
                 background-color: #f0f0f0;
                 color: #333;
                 border: 1px solid #999;
@@ -78,15 +78,20 @@ coordinates_box_style = '''
             }   
         '''
         
-# Instruction box style     
-instructions_style = '''
-            QTextEdit {
-                background-color: #121421;
-                color: white;
-                border: 1px solid #999;
-                border-radius: 2px;
-            } 
-        '''
+# Title style   
+title_style = '''
+    QLabel {
+        font-size: 20px;
+        font-weight: bold;
+        color: #121421; 
+        background-color: #C0C0C0; /* Light gray */
+        border: 1px inset #C0C0C0; /* Medium gray */
+        border-radius: 2px;
+        padding: 5px 10px;
+        margin: 5px;
+    }
+'''  
+
         
 #Tree view style
 tree_view_style = '''
