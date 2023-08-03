@@ -9,16 +9,66 @@ button_style = '''
             padding: 15px 32px;
             text-align: center;
             text-decoration: none;
-            display: inline-block;
             font-size: 16px;
+            font-weight: DemiBold;
             margin: 4px 2px;
-            cursor: pointer;
-            border-radius: 5px;
+            border-radius: 2px;
         }
         QPushButton:hover {
-            background-color: #2A78AC; 
+            background-color: #26488A; 
         }
         '''
+        
+# CSS for clear and save buttons
+buttonState_style = '''
+            QPushButton {
+                background-color: #26488A; /* Blue */
+                border: none;
+                color: white;
+                padding: 15px 32px;
+                text-align: center;
+                text-decoration: none;
+                font-size: 16px;
+                font-weight: DemiBold;
+                margin: 4px 2px;
+                border-radius: 2px;
+            }
+        '''
+buttonToggle_style = '''
+            QPushButton {
+                background-color: #26488A; /* Blue */
+                color: white;
+                text-align: center;
+                font-size: 8px;
+                font-weight: bold;
+                margin: 4px 2px;
+                border-radius: 2px;
+            }
+        '''
+# CSS for the toggle button
+buttonReset_Style = '''
+            QPushButton {
+                font-size: 14px;
+                font-family: "Helvetica", sans-serif;
+                font-weight: bold;
+                color: #121421;
+                background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                                  stop: 0 #c0c0c0, stop: 1 #a3a3a3); 
+                border: none;
+                border-radius: 2px;
+                text-align: center;
+                padding: 5px 10px;
+                margin: 5px;
+                min-width: 10px;
+                min-height: 10px;
+            }  
+            QPushButton:hover {
+                background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                                  stop: 0 #0056b3, stop: 1 #003f7f); /* Gradient from vibrant blue to darker blue on hover */
+            }
+        '''      
+# Title Label style 
+label_style = 'color: white; font-size: 14px; font-weight: bold;'
 # CSS for ComboBox
 combo_style = '''
             QComboBox {
@@ -41,13 +91,10 @@ combo_style = '''
                     stop:0 #d3d3d3, stop:1 #c3c3c3);
             }
 
-            QComboBox::down-arrow {
-                image: url(path/to/arrow_down.png);
-            }
-
             QComboBox QAbstractItemView {
                 border: 1px solid darkgray;
-                selection-background-color: lightgray;
+                selection-background-color: gray;
+                color: white ;
             }
         '''
         
@@ -57,7 +104,7 @@ frame_number_style = '''
                 font-size: 14px;
                 font-weight: bold;
                 color: #FFFFFF; /* White */
-                background-color: #121421; /* Dark blue */
+                background-color: #26488A; /* blue */
                 /* border: 1px solid #FFFFFF; /* White */             
                 border: thick inset hsl(120, 100%, 50%);
                 border-radius: 2px;
@@ -70,11 +117,11 @@ frame_number_style = '''
         '''
         
 coordinates_box_style = '''
-            QTextEdit{
+            QListWidget{
                 background-color: #f0f0f0;
                 color: #333;
-                border: 1px solid #999;
-                border-radius: 2px;
+                border: 2px solid #666;
+                border-radius: 4px;
             }   
         '''
         
@@ -91,8 +138,6 @@ title_style = '''
         margin: 5px;
     }
 '''  
-
-        
 #Tree view style
 tree_view_style = '''
             QTreeView {
