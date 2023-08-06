@@ -20,7 +20,7 @@ from dicomProcessing import DICOMImage, Landmark
 base_dir= 'D:/DataOrtho/'
 status_file = 'D:/DataOrtho/status.json'
 help_path = 'D:/DataOrthoHelp/'
-excel_paths = {'DATASET_AXIAL': 'D:/DataOrtho/DATASET_AXIAL/dataset_axial.xlsx', 
+excel_paths = {'DATASET_AXIAL': 'D:/DataOrtho/DAT ASET_AXIAL/dataset_axial.xlsx', 
                             'DATASET_SAGITTAL': 'D:/DataOrtho/DATASET_SAGITTAL/dataset_sagittal.xlsx',
                             'DATASET_DYNAMIC': 'D:/DataOrtho/DATASET_DYNAMIC/dataset_dynamic.xlsx'}
 max_landmarks = {'DATASET_AXIAL':11,'DATASET_SAGITTAL':7,'DATASET_DYNAMIC':18} 
@@ -31,12 +31,10 @@ class SignalHandler(QObject):
     landmarkRemoved = pyqtSignal(int)
     writeLandmark = pyqtSignal(int, int, float, float)
     clearLandmarks = pyqtSignal()
+    nextSlice = pyqtSignal()
+    previousSlice = pyqtSignal()
 
-'''Custom interactor Style class for VTK window 
-TODO:
- - Change the wheel to iterate through the images
- - SHIFT + wheel to zoom
-'''
+''' Custom interactor Style class for VTK window '''
 
 class CustomInteractorStyle(vtk.vtkInteractorStyleUser):
     def __init__(self,signalHandler,renderer,image_width,image_height,current_image,landmark_count,max_count,point_counter_label,parent=None):
@@ -135,16 +133,24 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleUser):
             self.point_counter_label.setText(f"Points: {self.landmark_count} - MAX: {self.max_count}")
                  
     def OnMouseWheelForward(self,obj,event):
-        camera= self.ren.GetActiveCamera()
-        camera.Dolly(1.1)
-        self.ren.ResetCameraClippingRange()
-        self.ren.GetRenderWindow().Render()
+        shift_key = self.GetInteractor().GetShiftKey()
+        if shift_key:    
+            camera= self.ren.GetActiveCamera()
+            camera.Dolly(1.1)
+            self.ren.ResetCameraClippingRange()
+            self.ren.GetRenderWindow().Render()
+        else:
+            self.signalHandler.nextSlice.emit()
     
     def OnMouseWheelBackward(self,obj,event):
-        camera = self.ren.GetActiveCamera()
-        camera.Dolly(0.9)  # Zoom out
-        self.ren.ResetCameraClippingRange()
-        self.ren.GetRenderWindow().Render()
+        shift_key = self.GetInteractor().GetShiftKey()
+        if shift_key: 
+            camera = self.ren.GetActiveCamera()
+            camera.Dolly(0.9)  # Zoom out
+            self.ren.ResetCameraClippingRange()
+            self.ren.GetRenderWindow().Render()
+        else:
+            self.signalHandler.previousSlice.emit()
         
     # Reseting the camera to its original values, position and focal point   
     def reset_camera(self):
@@ -224,6 +230,8 @@ class LabelingGUIWindow(QMainWindow):
         self.signalHandler.landmarkRemoved.connect(self.prev_help_image)
         self.signalHandler.landmarkRemoved.connect(self.remove_last_landmark_box)
         self.signalHandler.writeLandmark.connect(self.add_landmark_box)
+        self.signalHandler.nextSlice.connect(self.next_image)
+        self.signalHandler.previousSlice.connect(self.prev_image)
         self.interactor = self.vtkWidget.GetRenderWindow().GetInteractor()
         self.interactorStyle = CustomInteractorStyle(self.signalHandler,self.current_image.ren,image_width,image_height, 
                                                      self.current_image,0,self.max_count,self.point_counter_label)
@@ -344,9 +352,9 @@ class LabelingGUIWindow(QMainWindow):
             # slider layout
         self.slider_layout = QVBoxLayout()
         self.slider_layout.addWidget(windowSlider_label)
-        self.slider_layout.addWidget(self.windowSlider)
+        self.slider_layout.addWidget(self.create_slider_with_labels(self.windowSlider,False))
         self.slider_layout.addWidget(levelSlider_label)
-        self.slider_layout.addWidget(self.levelSlider)
+        self.slider_layout.addWidget(self.create_slider_with_labels(self.levelSlider,True))
         
         self.help_layout = QHBoxLayout()
         self.help_layout.addWidget(self.coordinates_box)
@@ -456,6 +464,29 @@ class LabelingGUIWindow(QMainWindow):
         image_property = self.current_image.get_image_property()
         image_property.SetColorLevel(level)
         self.vtkWidget.GetRenderWindow().Render()
+        
+        
+    def create_slider_with_labels(self, slider,inverse):
+        layout = QHBoxLayout()
+
+        minus_label = QLabel('-')
+        plus_label = QLabel('+')
+        minus_label.setStyleSheet('color: white; font-weight: DemiBold;')
+        plus_label.setStyleSheet('color: white; font-weight: DemiBold;')
+
+        if inverse:
+            layout.addWidget(plus_label)
+            layout.addWidget(slider)
+            layout.addWidget(minus_label)
+            
+        else:
+            layout.addWidget(minus_label)
+            layout.addWidget(slider)
+            layout.addWidget(plus_label)
+
+        widget = QWidget()
+        widget.setLayout(layout)
+        return widget
 
     #---- Button handling ----
     # Next image
