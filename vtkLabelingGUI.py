@@ -34,7 +34,7 @@ class SignalHandler(QObject):
     nextSlice = pyqtSignal()
     previousSlice = pyqtSignal()
 
-''' Custom interactor Style class for VTK window '''
+''' Custom interactor Style class for VTK window  '''
 
 class CustomInteractorStyle(vtk.vtkInteractorStyleUser):
     def __init__(self,signalHandler,renderer,image_width,image_height,current_image,landmark_count,max_count,point_counter_label,parent=None):
@@ -267,6 +267,7 @@ class LabelingGUIWindow(QMainWindow):
         self.clear_button = QPushButton('Clear Coordinates', self)
         self.save_button = QPushButton('Save Coordinates', self)
         self.resetView_button = QPushButton("Reset View",self)
+        self.removeSequence_button = QPushButton("Remove Current Sequence",self)
         
         
         self.nextButton.setCursor(QCursor(Qt.PointingHandCursor))
@@ -274,18 +275,21 @@ class LabelingGUIWindow(QMainWindow):
         self.clear_button.setCursor(QCursor(Qt.PointingHandCursor))
         self.save_button.setCursor(QCursor(Qt.PointingHandCursor))
         self.resetView_button.setCursor(QCursor(Qt.PointingHandCursor))
+        self.removeSequence_button.setCursor(QCursor(Qt.PointingHandCursor))
         
         self.nextButton.setStyleSheet(button_style)
         self.prevButton.setStyleSheet(button_style)
         self.clear_button.setStyleSheet(buttonState_style)
         self.save_button.setStyleSheet(buttonState_style)
         self.resetView_button.setStyleSheet(buttonReset_Style)
+        self.removeSequence_button.setStyleSheet(buttonReset_Style)
         
         self.nextButton.clicked.connect(self.next_image)
         self.prevButton.clicked.connect(self.prev_image)
         self.clear_button.clicked.connect(self.clear_Landmarks)
         self.save_button.clicked.connect(self.save_Landmarks)
         self.resetView_button.clicked.connect(self.reset_view)
+        self.removeSequence_button.clicked.connect(self.remove_current_sequence)
         
         #-- lines --
         line = QFrame(self)
@@ -378,8 +382,11 @@ class LabelingGUIWindow(QMainWindow):
         self.image_layout.addWidget(self.point_counter_label,alignment=Qt.AlignmentFlag.AlignCenter)
         self.image_layout.addWidget(self.image_path_label,alignment=Qt.AlignmentFlag.AlignCenter)
         self.image_layout.addWidget(line2)
-        self.image_layout.addWidget(self.resetView_button,alignment=Qt.AlignCenter)
-        
+
+        self.image_Sublayout = QHBoxLayout()
+        self.image_Sublayout.addWidget(self.resetView_button,alignment=Qt.AlignCenter)
+        self.image_Sublayout.addWidget(self.removeSequence_button, alignment=Qt.AlignCenter)
+        self.image_layout.addLayout(self.image_Sublayout)
         
         self.operate_widget = QWidget()
         self.operate_widget.setStyleSheet('background-color:#636E72')
@@ -561,7 +568,27 @@ class LabelingGUIWindow(QMainWindow):
     
     # Reset the view of the camera 
     def reset_view(self):
-        self.interactorStyle.reset_camera()
+        self.interactorStyle.reset_camera()     
+        
+          
+    def remove_current_sequence(self):
+        # Confirm the user wants to delete
+        confirmation = QMessageBox()
+        confirmation.setIcon(QMessageBox.Question)
+        confirmation.setWindowTitle('Remove Sequence')
+        confirmation.setText("Are you sure you want to remove the current sequence and its possible Landmarks?")
+        confirmation.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        confirmation.setStyleSheet("QLabel{ color: white; font-size: 11px;} QPushButton{ width:30px; font-size: 11px; } QMessageBox{ background-color: #4b4b4b; }")
+        ret = confirmation.exec()
+        
+        if ret == QMessageBox.Yes:
+            return 
+        else:
+            return
+        # Check for status on status.json
+        # Eliminate the landmarks on coordinate box
+        # Update à tree 
+        # Qual o próximo joelho a ser displayed?
         
     ''' ----------------------  STATUS OF LANDMARK LABELING ----------------------'''   
     # Finds the first unchecked sequence
@@ -627,11 +654,12 @@ class LabelingGUIWindow(QMainWindow):
             item_to_remove = self.coordinates_box.takeItem(last_item_index)
             del item_to_remove  # delete the item or it will linger in memory
         self.landmark_count-=1
-            
+    
+    # Reset of the coordinates box     
     def reset_landmark_box(self):
         self.coordinates_box.clear()
-        self.landmark_count=0  
-        
+        self.landmark_count=0          
+
     ''' ------------------  COMBOBOX AND TREE VIEW HANDLING ------------------'''  
     #Subsets for the combobobox
     def getDirectories(self):
@@ -699,7 +727,7 @@ class LabelingGUIWindow(QMainWindow):
         else:
             print(f"No status item found for sequence: {self.current_sequence_path}")
     
-    
+    # Load a new Sequence of Images
     def load_new_DICOMImage(self, item_path,status,dataset_type):
         if self.current_image is not None:
             self.current_image.ren.RemoveActor(self.current_image.actor)
@@ -730,8 +758,8 @@ class LabelingGUIWindow(QMainWindow):
                 slice_index = int(slice_id)
                 landmarks = data["Landmarks"]
                 for landmark in landmarks:
-                    self.current_image.add_landmark([landmark[0], landmark[1], slice_index])   
-                    self.add_landmark_box(slice_index, landmark_index,  landmark[0],landmark[1])
+                    self.current_image.add_landmark([landmark["Position"][0], landmark["Position"][1], slice_index])   
+                    self.add_landmark_box(slice_index, landmark_index,  landmark["Position"][0],landmark["Position"][1])
                     landmark_index+=1
             self.landmark_count = max_landmarks[self.current_image.dataset_type]
             self.interactorStyle.landmark_count=max_landmarks[self.current_image.dataset_type]
@@ -747,7 +775,6 @@ class LabelingGUIWindow(QMainWindow):
                  
     # choosing the sequence for any individual to display
     def on_sequence_clicked(self,index):
-        
         depth = 0
         parent = index.parent()
         while parent.isValid():
@@ -785,6 +812,7 @@ class LabelingGUIWindow(QMainWindow):
         item_path = os.path.join(base_dir,*sequence_path_parts)
         return item_path  
     
+
     ''' ------------------  HELP IMAGES AND LANDMARK TEXT VIEWING HANDLING ------------------''' 
     def load_help_images(self,subset):
         # To enable the load help images, the dataset and the knee in current path

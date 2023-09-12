@@ -12,11 +12,7 @@ import pandas as pd
     The DICOM standard specifies the patient coordinate system in a very specific way: the positive X-axis points to the patient's left, 
     the positive Y-axis points to the anterior (front) of the patient, and the positive Z-axis points to the head. 
     In other words, if the patient is lying down in the scanner with their head pointed at the screen and their feet pointing away, 
-    their left would be to the right of the screen, their anterior would be to the top of the screen, and their head would be coming out of the screen.
-            
-    The VTK viewer has to reconcile two different coordinate systems the vtks and the DICOM standard. 
-    The -90 degrees Z rotation applied is correcting for this initial rotation, bringing the images back into their original orientation as they were in the patient.
-            
+    their left would be to the right of the screen, their anterior would be to the top of the screen, and their head would be coming out of the screen.            
 '''
 excel_paths = {'DATASET_AXIAL': 'D:/DataOrtho/DATASET_AXIAL/dataset_axial.xlsx', 
                             'DATASET_SAGITTAL': 'D:/DataOrtho/DATASET_SAGITTAL/dataset_sagittal.xlsx',
@@ -29,7 +25,7 @@ class Landmark:
         self.circle.SetNumberOfSides(50)
         self.circle.SetCenter(position[0], position[1], 0) 
         self.circle.SetRadius(1.5)  # Set the radius of the marker
-        print(f'Landmark index: {self.position[2]}, Landmark center: {self.circle.GetCenter()} , Landmark radius: {self.circle.GetRadius()}')
+        #print(f'Landmark index: {self.position[2]}, Landmark center: {self.circle.GetCenter()} , Landmark radius: {self.circle.GetRadius()}')
         self.circleMapper = vtk.vtkPolyDataMapper()
         self.circleMapper.SetInputConnection(self.circle.GetOutputPort())
         self.circleActor = vtk.vtkActor()
@@ -56,11 +52,13 @@ class DICOMImage:
         self.width = 0
         self.height = 0
         self.dataset_type = ''
+        self.landmark_count = 1
         self.max_count = 0
         self.knee = ''
         self.individual = ''
         self.sequence = ''  
         self.extract_components(dicom_dir) # populate them props 
+        
         #first load
         self.load_dicom()
         self.update_image()
@@ -68,6 +66,7 @@ class DICOMImage:
         self.center = self.actor.GetCenter()
     
     '''  DICOM image iteration Treatment '''  
+    
     def load_dicom(self):
         if not self.dicom_paths:
             print("No valid DICOM images found.")
@@ -97,6 +96,7 @@ class DICOMImage:
             print(f"Error reading {self.dicom_paths[0]}: {str(e)}")   
             self.dicom_paths.pop(0)
             self.load_dicom()
+
     # next image
     def next_image(self):
         if self.index < len(self.dicom_paths) - 1:
@@ -136,17 +136,22 @@ class DICOMImage:
         slice_index = position[2]  # z is the slice index, and also the key
         if slice_index not in self.landmarks:
             self.landmarks[slice_index] = []
-        self.landmarks[slice_index].append(landmark)
+        self.landmarks[slice_index].append({
+            "Index": self.landmark_count,
+            "Position": landmark
+        })
+        self.landmark_count+=1
         self.update_landmarks_visibility()
         self.ren.GetRenderWindow().Render()
     
     def remove_landmark(self):
         if self.index in self.landmarks and len(self.landmarks[self.index]) > 0:
             removed_landmark = self.landmarks[self.index].pop()
+            self.landmark_count-=1
             # remove the landmark actor from the renderer
-            self.ren.RemoveActor(removed_landmark.circleActor)
+            self.ren.RemoveActor(removed_landmark["Position"].circleActor)
             self.ren.GetRenderWindow().Render()
-            return True, (removed_landmark.position)
+            return True, (removed_landmark["Position"].position)
         return False,()
         
     # Update of the points/landmark visibility, landmark marked on a slice are specific only to that slice
@@ -155,9 +160,9 @@ class DICOMImage:
             for landmark in landmarks:
                 # if the slice index is the current index, the landmark should be visible
                 # else it should be invisible
-                landmark.circleActor.SetVisibility(slice_index == self.index)
+                landmark['Position'].circleActor.SetVisibility(slice_index == self.index)
                       
-    # Saves the landmarks to the supposed files - json and excel
+    # Saves the landmarks to the supposed files
     def save_landmarks(self):
         json_file = os.path.join(self.dicom_dir, f"{self.sequence}.json")
         print('-> Landmarks saved for json file: ', json_file)
@@ -171,38 +176,63 @@ class DICOMImage:
                 "Slice": slice_id,
                 "#Landmarks": len(lm_list),
                 "Landmarks": [
-                    (lm.position[0], lm.position[1]) # change the position for the image processing coordinates
-                    for lm in lm_list
+                    {
+                        "Index" : lm["Index"],
+                        "Position": (lm["Position"].position[0], lm["Position"].position[1]) # change the position for the image processing coordinates
+                    } for lm in lm_list
                 ],
             }
             for slice_id, lm_list in self.landmarks.items() if lm_list
         }
+        try: 
+            with open(json_file, "w") as f:
+                json.dump(slice_data_dict, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Failed to save data to JSON due to: {e}")
+            return 0
+        
+        combined_landmarks = []
+        for slice_id, lm_list in self.landmarks.items():
+            for lm in lm_list:
+                combined_landmarks.append((lm["Position"].position[0], lm["Position"].position[1], lm["Index"], slice_id))
+        #sort the landmarks to be on the correct order
+        combined_landmarks = sorted(combined_landmarks, key=lambda x:x[2])
+        excel_data_dict = {
+                "Dataset": self.dataset_type,
+                "Individual": self.individual,
+                "Knee": self.knee,
+                "Sequence": self.sequence,
+                "Landmarks": combined_landmarks
+        }
+        try:    
+            excel_file_path = excel_paths[self.dataset_type]        
+            subset_df = pd.read_excel(excel_file_path)
 
-        with open(json_file, "w") as f:
-            json.dump(slice_data_dict, f, ensure_ascii=False, indent=4)
-        excel_file_path = excel_paths[self.dataset_type]        
-        subset_df = pd.read_excel(excel_file_path)
-        # checking if the sequence exists in the DataFrame
-        # for each slice create a new row or update existing one
-        for slice_data in slice_data_dict.values():
-            slice_data["Landmarks"] = str(slice_data["Landmarks"])  # Convert list to string with correct coordinates on it
-            #  if individual and sequence combination already exists check
-            matching_rows = (subset_df["Individual"] == slice_data["Individual"]) & (subset_df["Sequence"] == slice_data["Sequence"]) & (subset_df["Slice"] == slice_data["Slice"])
+            # Check if sequence exists in the DataFrame and remove rows
+            matching_rows = (subset_df["Individual"] == self.individual) & (subset_df["Sequence"] == self.sequence) & (subset_df["Knee"] == self.knee)
             if matching_rows.any():
-                subset_df.loc[matching_rows, slice_data.keys()] = slice_data.values()
-            else:
-                subset_df = subset_df.append(slice_data, ignore_index=True)
-        subset_df.to_excel(excel_file_path, index=False)
+                subset_df = subset_df[~matching_rows]
+
+            excel_data_dict["Landmarks"] = str(excel_data_dict["Landmarks"])
+            subset_df = subset_df.append(excel_data_dict, ignore_index=True)
+            subset_df.to_excel(excel_file_path, index=False) 
+        except Exception as e:
+            print(f"Failed to save data to Excel  due to: {e}")
+            # reinstate the empty json file
+            with open(json_file,'w') as f:
+                json.dump({},f,indent=4)
+            return 0
         self.status = 1
         # remove slices where there are empty lists
         self.landmarks = {k: v for k,v in self.landmarks.items() if v}
-        
+        return 1
     
     # Clear all landmarks marked in every slice and if status 1 clear json 
     def clear_landmarks(self):
+        self.landmark_count = 1
         for slice_index, landmarks in self.landmarks.items():
                 for landmark in landmarks:
-                    self.ren.RemoveActor(landmark.circleActor)
+                    self.ren.RemoveActor(landmark["Position"].circleActor)
         self.landmarks.clear()    
         self.ren.GetRenderWindow().Render()
         if self.status == 1:
@@ -217,8 +247,7 @@ class DICOMImage:
             subset_df = subset_df[~(mask)]
             subset_df.to_excel(excel_file_path, index=False)
             return 1
-        return 0
-            
+        return 0       
             
     # Get properties from any images sequence path 
     def extract_components(self,dicom_dir):
