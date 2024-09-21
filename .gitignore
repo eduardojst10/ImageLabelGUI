@@ -8,6 +8,10 @@ __pycache__/
 .venv/
 venv/
 
+# help folder
+help/
+old/
+
 # system-specific files
 .DS_Store  # macOS
 Thumbs.db  # Windows
