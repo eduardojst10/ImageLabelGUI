@@ -14,7 +14,8 @@ import numpy as np
 from pathlib import Path
 import vtk
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from styles import button_style, combo_style,frame_number_style,coordinates_box_style, title_style, tree_view_style,scrollbar_css, buttonState_style, label_style, buttonReset_Style, buttonToggle_style
+from styles import (button_style, combo_style,frame_number_style,coordinates_box_style, title_style, tree_view_style,scrollbar_css, buttonState_style, 
+    label_style, buttonReset_Style, buttonToggle_style, message_box_style)
 from dicomProcessing import DICOMImage, Landmark
 from config import BASE_DIR, STATUS_FILE, HELP_PATH, EXCEL_PATHS
 ''' -------------------  Global Vars -------------------'''
@@ -558,14 +559,14 @@ class LabelingGUIWindow(QMainWindow):
             msgBox.setWindowTitle("Success!") 
             msgBox.setText("Landmarks succesfully saved.")
             msgBox.setIcon(QMessageBox.Information)
-            msgBox.setStyleSheet("QLabel{ color: white; font-size: 11px;} QPushButton{ width:30px; font-size: 11px; } QMessageBox{ background-color: #4b4b4b; }")
+            msgBox.setStyleSheet(message_box_style)
             msgBox.exec()
         else:
             
             msgBox.setWindowTitle("Incomplete Landmarks")
             msgBox.setText(f"Please mark all the {self.max_count} landmarks before saving.")
             msgBox.setIcon(QMessageBox.Warning)
-            msgBox.setStyleSheet("QLabel{ color: white; font-size: 11px;} QPushButton{ width:30px; font-size: 11px; } QMessageBox{ background-color: #4b4b4b; }")
+            msgBox.setStyleSheet(message_box_style)
             msgBox.exec()
     
     # Reset the view of the camera 
@@ -840,7 +841,7 @@ class LabelingGUIWindow(QMainWindow):
         confirmation.setWindowTitle('Remove Sequence')
         confirmation.setText("Are you sure you want to remove the current sequence and its possible Landmarks?")
         confirmation.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        confirmation.setStyleSheet("QLabel{ color: white; font-size: 11px;} QPushButton{ width:30px; font-size: 11px; } QMessageBox{ background-color: #4b4b4b; }")
+        confirmation.setStyleSheet(message_box_style)
         ret = confirmation.exec()
         
         if ret == QMessageBox.Yes:

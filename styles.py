@@ -213,3 +213,9 @@ scrollbar_css = '''
         }
 '''
 
+message_box_style = '''
+    QLabel{ color: white; font-size: 11px;}
+    QPushButton{ width:30px; font-size: 11px; }
+    QMessageBox{ background-color: #4b4b4b; }
+'''
+
