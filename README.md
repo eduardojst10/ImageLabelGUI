@@ -5,6 +5,12 @@ folder scripts which need to be correctly edited with the paths of the User.
 
 ![LabelingGUI](https://github.com/eduardojst10/imageLabelGUI/assets/58005905/00f50db5-8ca2-4c40-816b-86c4a8d540fc)
 
-## Installation
+## Installation and Setup
 * Create environment for packages installation with python 3.7.0;
 * Forward install the requirements.txt with the needed packages (**pip install -r requirements.txt**).
+* Create a `.env` file by copying `.env.template`.
+* Fill in the `.env` file with your own local paths and settings.
+* Donwload the dataset (with permission).
+* Run /init folder scripts.
+* Run the application.
+

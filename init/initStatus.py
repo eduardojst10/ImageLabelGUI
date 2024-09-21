@@ -1,12 +1,14 @@
 import os
 import json
+from config import STATUS_FILE
 
 '''
     Script to populate status.json
     Editar dataset_path e status_file
 '''
 dtypes = ["AXIAL", "SAGITTAL", "DYNAMIC"]
-status_file = '.../status.json'
+status_file = STATUS_FILE
+
 # Load the existing status dictionary or create a new one if the file doesn't exist yet
 if os.path.isfile(status_file):
     with open(status_file, 'r') as f:
@@ -14,7 +16,7 @@ if os.path.isfile(status_file):
 else:
     status_dict = {}
 for dtype in dtypes:
-    dataset_path = f'.../DATASET_{dtype}'
+    dataset_path = f'D:/DataOrtho/DATASET_{dtype}'
     individual_dirs = [item for item in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, item))]
     for individual in sorted(individual_dirs, key=int):
         individual_path = os.path.join(dataset_path, individual)

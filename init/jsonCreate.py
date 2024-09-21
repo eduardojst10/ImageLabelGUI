@@ -1,16 +1,18 @@
 ''' Script to add .json files for state oversight in LabelingGUI
     Editar dataset_path
+    Running again resets all of the json files on the desired paths if existing
 '''
 import os
 import json
 import sys
+from config import BASE_DIR
 
 dtypes = ["AXIAL", "SAGITTAL", "DYNAMIC"]
 
 
 # Iterate through the individual folders
 for dtype in dtypes:
-    dataset_path = f'.../DATASET_{dtype}'
+    dataset_path = f'{BASE_DIR}/DATASET_{dtype}'
     for individual in os.listdir(dataset_path):
         individual_path = os.path.join(dataset_path, individual)
         

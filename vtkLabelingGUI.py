@@ -8,6 +8,7 @@ import re
 import json
 import os
 import sys
+import shutil
 import vtk.util.numpy_support as nps
 import numpy as np
 from pathlib import Path
@@ -15,14 +16,13 @@ import vtk
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from styles import button_style, combo_style,frame_number_style,coordinates_box_style, title_style, tree_view_style,scrollbar_css, buttonState_style, label_style, buttonReset_Style, buttonToggle_style
 from dicomProcessing import DICOMImage, Landmark
-
+from config import BASE_DIR, STATUS_FILE, HELP_PATH, EXCEL_PATHS
 ''' -------------------  Global Vars -------------------'''
-base_dir= 'D:/DataOrtho/'
-status_file = 'D:/DataOrtho/status.json'
-help_path = 'D:/DataOrthoHelp/'
-excel_paths = {'DATASET_AXIAL': 'D:/DataOrtho/DAT ASET_AXIAL/dataset_axial.xlsx', 
-                            'DATASET_SAGITTAL': 'D:/DataOrtho/DATASET_SAGITTAL/dataset_sagittal.xlsx',
-                            'DATASET_DYNAMIC': 'D:/DataOrtho/DATASET_DYNAMIC/dataset_dynamic.xlsx'}
+base_dir= BASE_DIR
+status_file = STATUS_FILE
+help_path = HELP_PATH
+excel_paths = EXCEL_PATHS
+
 max_landmarks = {'DATASET_AXIAL':11,'DATASET_SAGITTAL':7,'DATASET_DYNAMIC':18} 
 
 # SignalHandler class for Landmarks handling
@@ -113,7 +113,7 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleUser):
                 if (0 <= image_pos[0] < self.image_width) and (0 <= image_pos[1] < self.image_height):
                     self.current_image.add_landmark(image_pos)
                     self.landmark_count+=1
-                    print(f'+ Added Landmark {self.landmark_count} on slice {image_pos[2]} with coordinates: ', (image_pos[0],image_pos[1]))
+                    print(f'[+] Added Landmark {self.landmark_count} on slice {image_pos[2]} with coordinates: ', (image_pos[0],image_pos[1]))
                     self.point_counter_label.setText(f"Points: {self.landmark_count} - MAX: {self.max_count}")
                     self.signalHandler.landmarkAdded.emit(self.landmark_count)
                     self.signalHandler.writeLandmark.emit(image_pos[2], self.landmark_count, image_pos[0],image_pos[1])
@@ -128,7 +128,7 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleUser):
         if self.landmark_count > 0 and remove: #just a pop?
             #if self.landmark_count != self.max_count:
             self.signalHandler.landmarkRemoved.emit(self.landmark_count)
-            print(f'- Removed landmark {self.landmark_count} on slice {pos[2]} with coordinates: ', (pos[1],pos[0]))
+            print(f'[-] Removed landmark {self.landmark_count} on slice {pos[2]} with coordinates: ', (pos[1],pos[0]))
             self.landmark_count-=1
             self.point_counter_label.setText(f"Points: {self.landmark_count} - MAX: {self.max_count}")
                  
@@ -168,23 +168,23 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleUser):
 class LabelingGUIWindow(QMainWindow):
     def __init__(self, ):
         super().__init__()
-        self.setWindowTitle("LabelingGUI")
-        print("-- Welcome to LabelingGUIWindow's logs --\n")
+        self.setWindowTitle("ImageLabelingGUI")
+        print("-- Welcome to ImageLabelingGUI's logs --\n")
         self.setGeometry(100, 100, 1400, 800)  # position and size of the initial window
+
         self.frameWidget = QWidget()
         self.vtkWidget = QVTKRenderWindowInteractor(self.frameWidget)  
         
         ''' -------------  Variables of state -------------'''
         # First Current path is decided by current state - read of json 
         self.current_sequence_path, self.current_subset_path = self.getCurrentSequence()
-        
+            
         #Current help index
         self.help_image_index = 0
         self.help_images = []
-        self.status = 0
         ''' -------------  GUI COMPONENTS -------------'''
         self.title_label = QLabel(self)
-        self.title_label.setText("LabelingGUI")
+        self.title_label.setText("ImageLabelingGUI")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.title_label.setStyleSheet(title_style)
         
@@ -198,6 +198,7 @@ class LabelingGUIWindow(QMainWindow):
         # Landmark Points Counter
         self.landmark_count = 0
         self.max_count = max_landmarks[self.get_image_type(self.current_sequence_path)]
+    
         self.point_counter_label = QLabel(self)
         self.point_counter_label.setText(f"Points: {0} - MAX: {self.max_count}")
         self.point_counter_label.setStyleSheet(frame_number_style)
@@ -327,6 +328,7 @@ class LabelingGUIWindow(QMainWindow):
         self.coordinates_box.setStyleSheet(coordinates_box_style)
         self.coordinates_box.setSelectionMode(QAbstractItemView.NoSelection)
         self.coordinates_box.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.populate_coordinates_box()
               
         #-- Help Image holder --
         self.image_holder = QLabel(self)
@@ -343,7 +345,7 @@ class LabelingGUIWindow(QMainWindow):
         self.choose_data_layout.addWidget(self.tree_view)
         self.choose_data_layout.setSpacing(5)
         
-            # Image iteration button layout
+        # Image iteration button layout
         self.buttonIter_layout = QHBoxLayout()
         self.buttonIter_layout.addWidget(self.prevButton)
         self.buttonIter_layout.addWidget(self.nextButton)
@@ -570,26 +572,6 @@ class LabelingGUIWindow(QMainWindow):
     def reset_view(self):
         self.interactorStyle.reset_camera()     
         
-          
-    def remove_current_sequence(self):
-        # Confirm the user wants to delete
-        confirmation = QMessageBox()
-        confirmation.setIcon(QMessageBox.Question)
-        confirmation.setWindowTitle('Remove Sequence')
-        confirmation.setText("Are you sure you want to remove the current sequence and its possible Landmarks?")
-        confirmation.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        confirmation.setStyleSheet("QLabel{ color: white; font-size: 11px;} QPushButton{ width:30px; font-size: 11px; } QMessageBox{ background-color: #4b4b4b; }")
-        ret = confirmation.exec()
-        
-        if ret == QMessageBox.Yes:
-            return 
-        else:
-            return
-        # Check for status on status.json
-        # Eliminate the landmarks on coordinate box
-        # Update à tree 
-        # Qual o próximo joelho a ser displayed?
-        
     ''' ----------------------  STATUS OF LANDMARK LABELING ----------------------'''   
     # Finds the first unchecked sequence
     def find_first_unchecked_sequence(self):
@@ -621,6 +603,20 @@ class LabelingGUIWindow(QMainWindow):
     def getCurrentSequence(self):
         src_subsets = [os.path.join(base_dir, d) for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
         current = self.find_first_unchecked_sequence() # finds the first 0 status available: axial -> dynamic -> sagittal
+        
+        if not current:
+            with open(status_file,'r') as f:
+                status_dict = json.load(f)
+        
+        if status_dict:
+            current = next(iter(status_dict))
+            
+        else:
+            print("No sequences found in status.json. The program will now exit.")
+            QMessageBox.critical(self, "Error", "No sequences found. The program will now exit.")
+            QApplication.quit()
+            sys.exit(1)       
+             
         subset = next((s for s in src_subsets if current.startswith(s)), '')           
         return current,subset
     
@@ -658,7 +654,25 @@ class LabelingGUIWindow(QMainWindow):
     # Reset of the coordinates box     
     def reset_landmark_box(self):
         self.coordinates_box.clear()
-        self.landmark_count=0          
+        self.landmark_count=0 
+    
+    # populate self.coordinates_box with the landmarks of the current image
+    def populate_coordinates_box(self):
+        self.coordinates_box.clear()
+        if self.current_image.status == 1:
+            
+            for slice_index, landmarks in self.current_image.landmarks.items():
+                for landmark in landmarks:
+                    index = landmark["Index"]
+                    position = landmark["Position"].position
+                    self.add_landmark_box(slice_index, index, position[0], position[1])
+        
+
+        # Update landmark count and label
+        self.landmark_count = self.current_image.landmark_count
+        self.max_count = max_landmarks[self.current_image.dataset_type]
+        self.point_counter_label.setText(f"Points: {self.landmark_count} - MAX: {self.max_count}")
+        self.interactorStyle.landmark_count = self.landmark_count         
 
     ''' ------------------  COMBOBOX AND TREE VIEW HANDLING ------------------'''  
     #Subsets for the combobobox
@@ -747,32 +761,17 @@ class LabelingGUIWindow(QMainWindow):
         # The camera is now updated with the correspondent correct values
         self.interactorStyle.update_parameters(self.current_image.width,self.current_image.height,self.current_image,0,max_landmarks[dataset_type])
         # if new item_path completed lets load landmarks from Json
-        if status == 1:  
-            json_path = os.path.join(self.current_image.dicom_dir, f"{self.current_image.sequence}.json")  
+        if status == 1:
+            json_path = os.path.join(self.current_image.dicom_dir, f"{self.current_image.sequence}.json")
             self.current_image.status = 1
-            print(f"-> Got json values for: New current path choosen {json_path} |")
-            with open(json_path, 'r') as file:
-                slice_data_dict = json.load(file)
-            landmark_index = 1
-            for slice_id, data in slice_data_dict.items():
-                slice_index = int(slice_id)
-                landmarks = data["Landmarks"]
-                for landmark in landmarks:
-                    self.current_image.add_landmark([landmark["Position"][0], landmark["Position"][1], slice_index])   
-                    self.add_landmark_box(slice_index, landmark_index,  landmark["Position"][0],landmark["Position"][1])
-                    landmark_index+=1
-            self.landmark_count = max_landmarks[self.current_image.dataset_type]
-            self.interactorStyle.landmark_count=max_landmarks[self.current_image.dataset_type]
-            self.point_counter_label.setText(f"Points: {self.landmark_count} - MAX: {max_landmarks[self.current_image.dataset_type]}")
-
+            print(f"-> Loading landmarks for completed sequence: {json_path}")
+            self.current_image.load_landmarks_from_json(json_path)
         else:
-            print(f'|-> Tree clicked: New current path choosen {self.current_sequence_path}|')
-            self.coordinates_box.clear()
-            # restore and update the point counter
-            self.landmark_count = 0
-            self.max_count = max_landmarks[self.current_image.dataset_type]
-            self.point_counter_label.setText(f"Points: {self.landmark_count} - MAX: {max_landmarks[self.current_image.dataset_type]} ")      
-                 
+            self.current_image.status = 0
+            print(f'|-> Loading new uncompleted sequence: {self.current_sequence_path}')
+        
+        # Populate coordinates box and update landmark information
+        self.populate_coordinates_box()
     # choosing the sequence for any individual to display
     def on_sequence_clicked(self,index):
         depth = 0
@@ -811,6 +810,87 @@ class LabelingGUIWindow(QMainWindow):
         #  joins all the parts of the sequence path to form the complete file path
         item_path = os.path.join(base_dir,*sequence_path_parts)
         return item_path  
+    # updates the tree by removing the sequence from it
+    def remove_sequence_tree_view(self,sequence_path):
+        sequence_path_components = self.extract_components(sequence_path)
+        if sequence_path_components is None:
+            print(f"|Error|-> Failed to extract components from sequence path: {sequence_path}")
+            return
+        
+        path_parts_tree_order  = [sequence_path_components["Individual"], sequence_path_components["Knee"], sequence_path_components["Sequence"]]
+        parent_item = self.model.invisibleRootItem()
+        for part in path_parts_tree_order:
+            for row in range(parent_item.rowCount()):
+                child_item = parent_item.child(row)
+                if child_item.text() == part:
+                    parent_item = child_item
+                    break 
+                
+        # find the parent of the sequence item and remove the sequence item
+        grand_parent = parent_item.parent()
+        if grand_parent is not None:
+            print(f'|-> Sequence removed from tree: New current path choosen {self.current_sequence_path}|')
+            grand_parent.removeRow(parent_item.row())
+                
+    # Deletes completly the current sequence that the viewer is labeling
+    def remove_current_sequence(self):
+        # Confirm the user wants to delete
+        confirmation = QMessageBox()
+        confirmation.setIcon(QMessageBox.Question)
+        confirmation.setWindowTitle('Remove Sequence')
+        confirmation.setText("Are you sure you want to remove the current sequence and its possible Landmarks?")
+        confirmation.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        confirmation.setStyleSheet("QLabel{ color: white; font-size: 11px;} QPushButton{ width:30px; font-size: 11px; } QMessageBox{ background-color: #4b4b4b; }")
+        ret = confirmation.exec()
+        
+        if ret == QMessageBox.Yes:
+            try:
+                # Update status.json - Check for status on status.json
+                with open(status_file, 'r') as f:
+                    status_data = json.load(f)
+                sequence_keys = list(status_data.keys())
+                current_index = sequence_keys.index(self.current_sequence_path)
+                
+                # Delete the sequence from the status.json. Excel only if status 1
+                if self.current_sequence_path in status_data:
+                    if status_data[self.current_sequence_path] == 1:
+                        print('remove excel')
+                    #TODO: excel remover
+                        self.current_image.clear_landmarks()              
+                    # status.json - works
+                    del status_data[self.current_sequence_path]
+                  
+                with open(status_file, 'w') as f:
+                    json.dump(status_data, f,indent=4)
+                # removal update on the tree before self.current_sequence_path is updated
+                self.remove_sequence_tree_view(self.current_sequence_path)
+                # remove the directory - works
+                shutil.rmtree(self.current_sequence_path) 
+                
+                # Last one, next sequence to be displayed is the immediatly afterwards - 
+                # #TODO:Ciclo for? Procurar e fazer um processo iterativo a encontrar o próximo 0
+                last_current_sequence_path = self.current_sequence_path
+                if current_index + 1 < len(sequence_keys):
+                    next_sequence_path = sequence_keys[current_index + 1]
+                    self.current_sequence_path = next_sequence_path
+                    self.update_image_path_label(next_sequence_path)
+                    subset = self.get_image_type(self.current_sequence_path)
+                    # Reload the GUI to reflect the removal, or switch to a placeholder image or message
+                    self.load_new_DICOMImage(next_sequence_path,status_data.get(self.current_sequence_path),subset)  
+                    # Eliminate the landmarks on coordinate box
+                    self.reset_landmark_box()
+                    self.load_help_images(subset)
+                    self.landmark_count = 0
+                    self.slice = self.current_image.index+1
+                    self.slice_number.setText(str(self.slice))                    
+                else:         
+                    self.current_sequence_path = sequence_keys[0]   
+                    QMessageBox.information(self, 'Last Sequence', "Failed to upload new sequence due to missing sequence of images with status 0.")
+            
+                print(f'|-> Completly eliminated sequence {last_current_sequence_path}')
+                   
+            except Exception as e:
+                QMessageBox.warning(self, 'Error', f"Failed to delete sequence due to: {e}")
     
 
     ''' ------------------  HELP IMAGES AND LANDMARK TEXT VIEWING HANDLING ------------------''' 
@@ -872,6 +952,6 @@ class LabelingGUIWindow(QMainWindow):
         
 if __name__ == "__main__":
     app = QApplication(sys.argv)  
-    mainWindow = LabelingGUIWindow()
+    mainWindow = LabelingGUIWindow() 
     mainWindow.show() 
     sys.exit(app.exec_())  # start the app

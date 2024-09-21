@@ -7,17 +7,19 @@ import pydicom
 import numpy as np
 from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
 import pandas as pd
+from config import EXCEL_PATHS
 
 '''
     The DICOM standard specifies the patient coordinate system in a very specific way: the positive X-axis points to the patient's left, 
+
     the positive Y-axis points to the anterior (front) of the patient, and the positive Z-axis points to the head. 
     In other words, if the patient is lying down in the scanner with their head pointed at the screen and their feet pointing away, 
     their left would be to the right of the screen, their anterior would be to the top of the screen, and their head would be coming out of the screen.            
 '''
-excel_paths = {'DATASET_AXIAL': 'D:/DataOrtho/DATASET_AXIAL/dataset_axial.xlsx', 
-                            'DATASET_SAGITTAL': 'D:/DataOrtho/DATASET_SAGITTAL/dataset_sagittal.xlsx',
-                            'DATASET_DYNAMIC': 'D:/DataOrtho/DATASET_DYNAMIC/dataset_dynamic.xlsx'}
+excel_paths = EXCEL_PATHS
+
 max_landmarks = {'DATASET_AXIAL':11,'DATASET_SAGITTAL':7,'DATASET_DYNAMIC':18} 
+
 class Landmark:
     def __init__(self, position):
         self.position = position # includes the index
@@ -44,8 +46,7 @@ class DICOMImage:
         self.ren = ren
         self.ren.AddActor(self.actor)
         self.landmarks={} 
-        # status
-        self.status = 0
+        
         # Image properties
         self.index = 0
         self.max_slice = len(self.dicom_paths)
@@ -64,7 +65,15 @@ class DICOMImage:
         self.update_image()
         self.actor.Modified()
         self.center = self.actor.GetCenter()
+        # Check if there's a corresponding JSON file with landmarks
+        json_file = os.path.join(self.dicom_dir, f"{self.sequence}.json")
+        if os.path.exists(json_file):
+            self.load_landmarks_from_json(json_file)
+            self.status = 1
+        else:
+            self.status = 0
     
+
     '''  DICOM image iteration Treatment '''  
     
     def load_dicom(self):
@@ -243,11 +252,25 @@ class DICOMImage:
             excel_file_path = excel_paths[self.dataset_type]        
             subset_df = pd.read_excel(excel_file_path)
             # its not removing the landmarks
-            mask = (subset_df["Individual"] == int(self.individual)) & (subset_df["Sequence"] == self.sequence)
+            mask = (subset_df["Individual"] == int(self.individual)) & (subset_df["Sequence"] == self.sequence) & (subset_df["Knee"] == self.knee)
             subset_df = subset_df[~(mask)]
             subset_df.to_excel(excel_file_path, index=False)
             return 1
-        return 0       
+        return 0  
+    # in case of json file exists - only load the landmarks into the images
+    def load_landmarks_from_json(self, json_file):
+        with open(json_file, 'r') as file:
+            slice_data_dict = json.load(file)
+        
+        for slice_id, data in slice_data_dict.items():
+            slice_index = int(slice_id)
+            landmarks = data["Landmarks"]
+            for landmark in landmarks:
+                position = [landmark["Position"][0], landmark["Position"][1], slice_index]
+                self.add_landmark(position)
+        
+        self.landmark_count = sum(len(landmarks) for landmarks in self.landmarks.values())
+        self.update_landmarks_visibility()     
             
     # Get properties from any images sequence path 
     def extract_components(self,dicom_dir):
